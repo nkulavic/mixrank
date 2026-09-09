@@ -107,11 +107,27 @@ func TestContactValidationIncompleteOutputAndBudget(t *testing.T) {
 	}
 }
 func TestContactValidationCancellationKeepsJob(t *testing.T) {
-	c := testClient(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"id":"job","completed_at":null}`) })
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	polling := make(chan struct{})
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			fmt.Fprint(w, `{"id":"job","completed_at":null}`)
+			return
+		}
+		close(polling)
+		<-r.Context().Done()
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	r := validationContactReport()
-	if e := c.ValidateContacts(ctx, r, ContactValidationOptions{Wait: time.Second}); e == nil || r.Validation.JobID != "job" {
+	done := make(chan error, 1)
+	go func() { done <- c.ValidateContacts(ctx, r, ContactValidationOptions{Wait: 10 * time.Second}) }()
+	select {
+	case <-polling:
+	case <-ctx.Done():
+		t.Fatal("job did not reach polling")
+	}
+	cancel()
+	if e := <-done; e == nil || r.Validation.JobID != "job" {
 		t.Fatal("cancellation lost submitted job")
 	}
 }
