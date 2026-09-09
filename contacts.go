@@ -167,6 +167,7 @@ func (c *Client) CompanyContacts(ctx context.Context, opts ContactOptions) (*Con
 }
 
 var errContactBudget = errors.New("request budget exhausted")
+var errContactNotStarted = errors.New("queued request cancelled before it started")
 
 type contactWork struct {
 	client *Client
@@ -180,11 +181,11 @@ func (w *contactWork) request(ctx context.Context, op string, in Request) (map[s
 	select {
 	case w.slots <- struct{}{}:
 	case <-ctx.Done():
-		return nil, context.Cause(ctx)
+		return nil, errors.Join(errContactNotStarted, context.Cause(ctx))
 	}
 	defer func() { <-w.slots }()
 	if err := ctx.Err(); err != nil {
-		return nil, context.Cause(ctx)
+		return nil, errors.Join(errContactNotStarted, context.Cause(ctx))
 	}
 	for {
 		used := w.calls.Load()
@@ -375,8 +376,12 @@ func (c *Client) enrichContact(ctx context.Context, company CompanyTarget, candi
 	}
 	profile, err := work.request(ctx, "get_person_by_id", Request{Parameters: map[string]string{"id": candidate.PersonID, "enable": enable}})
 	if err != nil {
-		if !errors.Is(err, errContactBudget) && ctx.Err() == nil {
+		if !errors.Is(err, errContactBudget) && !errors.Is(err, errContactNotStarted) {
 			candidate.EnrichmentStatus = "error"
+			var api *APIError
+			if errors.As(err, &api) && api.Uncertain {
+				candidate.EnrichmentStatus = "uncertain"
+			}
 			candidate.EmailStatus = "error"
 			candidate.PhoneStatus = "error"
 		}

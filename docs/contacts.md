@@ -16,7 +16,7 @@ Company input accepts an array, a `companies` export, or raw Elasticsearch compa
 
 Every consistent discovered person appears under their company's `contacts`. Each row includes `has_email`, `has_phone`, `enrichment_status`, `email_status`, `phone_status`, employment evidence, dates and review reasons. There is no separate array for people missing contact details.
 
-`enrichment_status` is `complete`, `not_enriched`, or `error`. Complete enrichment can still return no channels. Not-enriched rows mean the contact target, request budget or cancellation stopped work; they do not mean contact information is unavailable. Privacy-redacted records are excluded.
+`enrichment_status` is `complete`, `not_enriched`, `error`, or `uncertain`. Complete enrichment can still return no channels. Uncertain means a request started but its outcome was not established; do not blindly replay it. Not-enriched rows mean the contact target, request budget or cancellation stopped work; they do not mean contact information is unavailable. Privacy-redacted records are excluded.
 
 | `--contact-filter` | Returned people |
 |---|---|

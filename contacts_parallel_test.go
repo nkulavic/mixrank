@@ -140,3 +140,17 @@ func TestContactsUnifiedRowsAndFilters(t *testing.T) {
 		}
 	}
 }
+
+func TestContactsFatalEnrichmentIsNotMarkedUnrequested(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/_search") {
+			json.NewEncoder(w).Encode(map[string]any{"hits": map[string]any{"total": 1, "hits": []any{contactHit("1", "123", "Owner", true)}}})
+			return
+		}
+		http.Error(w, "forbidden", 403)
+	})
+	r, e := c.CompanyContacts(context.Background(), ContactOptions{Companies: []CompanyTarget{{Domain: "example.test"}}, Concurrency: 1})
+	if e == nil || r.Complete || r.Companies[0].Contacts[0].EnrichmentStatus != "error" || r.RequestsMade != 2 {
+		t.Fatal("sent request mislabeled as unrequested", e, r)
+	}
+}
