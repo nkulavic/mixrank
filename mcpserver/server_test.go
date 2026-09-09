@@ -106,7 +106,7 @@ func TestMCPContactWorkflow(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer cs.Close()
-	r, e := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "mixrank_company_contacts", Arguments: map[string]any{"companies": []any{map[string]any{"company_ids": []int{123}, "domain": "example.test"}}, "max_contacts_per_company": 1, "concurrency": 2, "contact_filter": "email", "validate_emails": true, "validation_wait_seconds": 0}})
+	r, e := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "mixrank_company_contacts", Arguments: map[string]any{"companies": []any{map[string]any{"company_ids": []int{123}, "domain": "example.test"}, map[string]any{"company_ids": []int{456}, "domain": "https://www.example.test/", "name_aliases": []string{"Example Inc"}}}, "max_contacts_per_company": 1, "concurrency": 2, "contact_filter": "email", "validate_emails": true, "validation_wait_seconds": 0}})
 	if e != nil || r.IsError {
 		t.Fatal(e, r)
 	}
@@ -119,6 +119,9 @@ func TestMCPContactWorkflow(t *testing.T) {
 	}
 	if report.ContactFilterApplied {
 		t.Fatal("pending validation lost resumable contacts")
+	}
+	if len(report.Companies) != 1 || report.CompanyMerge.DuplicatesMerged != 1 || len(report.Companies[0].Company.CompanyIDs) != 2 {
+		t.Fatal("MCP did not merge duplicate companies", report)
 	}
 	resumed, e := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "mixrank_validate_contacts", Arguments: map[string]any{"report": report, "validation_wait_seconds": 0}})
 	if e != nil || resumed.IsError || submits != 1 {

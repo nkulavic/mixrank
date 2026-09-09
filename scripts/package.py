@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate synchronized agent packages; --release adds native binaries and archives."""
 import argparse,hashlib,json,os,pathlib,shutil,subprocess,tarfile,zipfile
-root=pathlib.Path(__file__).resolve().parents[1];version='0.3.0'
+root=pathlib.Path(__file__).resolve().parents[1];version='0.4.0'
 ap=argparse.ArgumentParser();ap.add_argument('--release',action='store_true');ap.add_argument('--reuse-binaries',action='store_true',help='Repackage already-built binaries without recompiling');ap.add_argument('--check',action='store_true');args=ap.parse_args()
 def write(path,data):
  p=root/path;p.parent.mkdir(parents=True,exist_ok=True);b=json.dumps(data,indent=2)+'\n'

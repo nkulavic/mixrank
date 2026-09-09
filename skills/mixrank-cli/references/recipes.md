@@ -47,3 +47,7 @@ mixrank api get-companies-by-company-id-timeseries --company-id 123 --since 2024
 ```
 
 The JSON returned by Elasticsearch retains `_source`, hit scores, sort cursors, aggregation buckets, and total-count relation. `hits.total.relation=gte` is a lower bound; it is not an exact count.
+
+## Duplicate company rows
+
+Pass company arrays or Elasticsearch hits directly to `mixrank contacts --companies FILE` (MCP: `mixrank_company_contacts`). The shared workflow merges exact company-ID/domain matches before lookup, retaining alternate IDs, names and domains. Inspect `company_merge` for input and unique counts. No extra deduplication script is needed.

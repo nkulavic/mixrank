@@ -26,7 +26,7 @@ func TestContactsCLIJSONAndNoOverwrite(t *testing.T) {
 	dir := t.TempDir()
 	input := filepath.Join(dir, "companies.json")
 	out := filepath.Join(dir, "contacts.json")
-	os.WriteFile(input, []byte(`{"companies":[{"company_id":123,"company_name":"Example","domain":"example.test"}]}`), 0600)
+	os.WriteFile(input, []byte(`{"companies":[{"company_id":123,"company_name":"Example","domain":"example.test"},{"company_id":456,"company_name":"Example Inc","domain":"https://WWW.example.test/"}]}`), 0600)
 	cmd := newContactsCommand(factory)
 	cmd.SetArgs([]string{"--companies", input, "--output", out})
 	if e := cmd.Execute(); e != nil {
@@ -36,6 +36,9 @@ func TestContactsCLIJSONAndNoOverwrite(t *testing.T) {
 	var result mixrank.ContactReport
 	if json.Unmarshal(b, &result) != nil || result.Companies[0].Status != "no_matching_people" {
 		t.Fatal(string(b))
+	}
+	if len(result.Companies) != 1 || result.CompanyMerge.DuplicatesMerged != 1 || len(result.Companies[0].Company.CompanyIDs) != 2 || calls != 1 {
+		t.Fatal("CLI did not consolidate duplicate input", string(b))
 	}
 	cmd = newContactsCommand(factory)
 	cmd.SetOut(&bytes.Buffer{})

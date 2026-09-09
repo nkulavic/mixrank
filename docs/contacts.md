@@ -10,7 +10,33 @@ mixrank contacts --companies companies.json --roles 'owner,president,office mana
 mixrank contacts validate --input contacts.json --validation-wait 2m --output validated.json
 ```
 
-Company input accepts an array, a `companies` export, or raw Elasticsearch company hits. Use `--companies -` for stdin. A company requires an ID or domain; names alone are ambiguous. Numeric IDs preserve precision, and duplicate aliases can be provided using `company_ids`.
+Company input accepts an array, a `companies` export, or raw Elasticsearch company hits. Use `--companies -` for stdin. A company requires an ID or domain; names alone are ambiguous. Numeric IDs preserve precision. Duplicate rows are merged automatically before any API calls; no preprocessing script is needed.
+
+## Automatic company merging
+
+The shared SDK workflow used by CLI and both MCP transports merges rows connected by an exact normalized domain or a shared company ID. It resolves transitive links too: if one row connects two earlier records, all three become one business. Matching does not use company names. URL schemes, paths, capitalization, a trailing hostname dot and a leading `www.` are removed from domains; different subdomains remain distinct.
+
+First-seen company order and display values stay stable. All distinct `company_ids` are retained; alternate names and domains appear as `name_aliases` and `domain_aliases`. Search uses all retained identities, and email filtering accepts the supplied employer domain aliases. Conflicting qualification statuses become `needs_review`. Aliases are supplied evidence, not independently verified ownership or guessed relationships.
+
+The report includes `company_merge` with `input_records`, `unique_companies`, and `duplicates_merged`. Duplicate companies consume one search and one candidate budget. Repeated person IDs within the merged company consume one contact append. Bulk validation deduplicates the final email set. The SDK also exposes `MergeCompanyTargets` for callers needing the same merge without API access.
+
+The unit is a business account: branches sharing a domain consolidate together. To keep distinct franchise/location IDs separate, supply IDs without the shared domain. Names alone never merge accounts. At most ten distinct IDs and ten domains may belong to a merged account; exceeding a limit fails before requests rather than silently dropping identities.
+
+```json
+{
+  "company_merge": {"input_records": 3, "unique_companies": 1, "duplicates_merged": 2},
+  "companies": [{
+    "company": {
+      "name": "Example Services",
+      "name_aliases": ["Example Services Inc"],
+      "company_ids": ["123", "456"],
+      "domain": "example.test",
+      "domain_aliases": ["new.example.test"]
+    },
+    "contacts": []
+  }]
+}
+```
 
 ## One contacts array
 
@@ -30,7 +56,7 @@ Every consistent discovered person appears under their company's `contacts`. Eac
 
 Company rows remain present when filters return no people. `contacts_filtered` counts omitted rows. If validation is pending, filtering is deferred (`contact_filter_applied: false`) to preserve the complete submitted email set for resumption. Resuming the job applies the requested filter after completion. Review flags remain separate from channel availability and deliverability.
 
-`--max-contacts` is the enrichment stopping target, default two people with requested channels per company, maximum five. For `email`, `phone`, or `both`, that channel criterion controls the target. `valid-email` searches for emails, then filters by validation; it cannot promise that two will validate. `all` may return more than two rows because it also keeps discovered people without channels or not yet enriched. `--max-candidates` limits discovery to ten people by default, maximum 25. At most 25 companies are accepted per run.
+`--max-contacts` is the enrichment stopping target, default two people with requested channels per company, maximum five. For `email`, `phone`, or `both`, that channel criterion controls the target. `valid-email` searches for emails, then filters by validation; it cannot promise that two will validate. `all` may return more than two rows because it also keeps discovered people without channels or not yet enriched. `--max-candidates` limits discovery to ten people by default, maximum 25. Up to 250 input rows are accepted, with at most 25 unique companies after merging.
 
 ## Email validation in the same call
 

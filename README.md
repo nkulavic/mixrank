@@ -36,7 +36,7 @@ mixrank contacts --companies companies.json --concurrency 4 --validate-emails --
 mixrank contacts --domain example.com --max-contacts 2
 ```
 
-This finds current relevant people and retrieves available business emails and direct dials, with source dates, missing-data statuses and review flags. The SDK and MCP expose the same workflow through `CompanyContacts` and `mixrank_company_contacts`. [Contact workflow](docs/contacts.md).
+This automatically merges duplicate company IDs/domains, finds current relevant people, and retrieves available business emails and direct dials, with source dates, missing-data statuses and review flags. Alternate names, IDs and domains are retained; duplicate accounts consume one lookup workflow. The SDK and MCP expose the same workflow through `CompanyContacts` and `mixrank_company_contacts`. [Contact workflow](docs/contacts.md).
 
 ## SDK and MCP
 

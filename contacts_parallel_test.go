@@ -78,14 +78,19 @@ func TestContactsGlobalBudgetAcrossCompanies(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 		if strings.HasSuffix(r.URL.Path, "/_search") {
-			json.NewEncoder(w).Encode(map[string]any{"hits": map[string]any{"total": 3, "hits": []any{contactHit("1", "123", "Owner", true), contactHit("2", "123", "President", true), contactHit("3", "123", "CEO", true)}}})
+			var q map[string]any
+			json.NewDecoder(r.Body).Decode(&q)
+			nested := q["query"].(map[string]any)["bool"].(map[string]any)["must"].([]any)[0].(map[string]any)["nested"].(map[string]any)
+			identifiers := nested["query"].(map[string]any)["bool"].(map[string]any)["filter"].([]any)[1].(map[string]any)["bool"].(map[string]any)["should"].([]any)
+			id := identifiers[0].(map[string]any)["terms"].(map[string]any)["experience.company_id"].([]any)[0].(string)
+			json.NewEncoder(w).Encode(map[string]any{"hits": map[string]any{"total": 3, "hits": []any{contactHit("1", id, "Owner", true), contactHit("2", id, "President", true), contactHit("3", id, "CEO", true)}}})
 			return
 		}
 		fmt.Fprint(w, `{"b2b_emails":null,"directdials":null}`)
 	})
 	companies := []CompanyTarget{}
 	for i := 0; i < 8; i++ {
-		companies = append(companies, CompanyTarget{CompanyIDs: []string{"123"}, Name: fmt.Sprint(i)})
+		companies = append(companies, CompanyTarget{CompanyIDs: []string{fmt.Sprint(123 + i)}, Name: fmt.Sprint(i)})
 	}
 	r, e := c.CompanyContacts(context.Background(), ContactOptions{Companies: companies, Concurrency: 3, MaxRequests: 10})
 	if e != nil || r.Complete || calls.Load() != 10 || r.RequestsMade != 10 || peak.Load() > 3 || peak.Load() < 2 {

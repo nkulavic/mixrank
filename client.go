@@ -407,7 +407,7 @@ func (c *Client) do(ctx context.Context, method, path string, q url.Values, body
 		return nil, errors.New("cannot construct request")
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "mixrank-go/0.3.0")
+	req.Header.Set("User-Agent", "mixrank-go/0.4.0")
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}

@@ -20,8 +20,10 @@ import (
 // CompanyTarget identifies an account, without relying on an ambiguous name.
 type CompanyTarget struct {
 	Name          string   `json:"name,omitempty"`
+	NameAliases   []string `json:"name_aliases,omitempty"`
 	CompanyIDs    []string `json:"company_ids,omitempty"`
 	Domain        string   `json:"domain,omitempty"`
+	DomainAliases []string `json:"domain_aliases,omitempty"`
 	Qualification string   `json:"qualification_status,omitempty"`
 }
 
@@ -90,6 +92,7 @@ type CompanyContactResult struct {
 }
 
 type ContactReport struct {
+	CompanyMerge         *CompanyMergeSummary     `json:"company_merge,omitempty"`
 	ContactFilterApplied bool                     `json:"contact_filter_applied"`
 	Validation           *ContactValidationReport `json:"email_validation,omitempty"`
 	Concurrency          int                      `json:"concurrency"`
@@ -109,16 +112,14 @@ var defaultContactRoles = []string{"owner", "founder", "CEO", "president", "gene
 // share one contacts array; availability and enrichment status stay explicit.
 // Validation is opt-in and uses a deduplicated bulk job, never parallel one-offs.
 func (c *Client) CompanyContacts(ctx context.Context, opts ContactOptions) (*ContactReport, error) {
-	opts.Companies = append([]CompanyTarget(nil), opts.Companies...)
-	for i := range opts.Companies {
-		opts.Companies[i].CompanyIDs = append([]string(nil), opts.Companies[i].CompanyIDs...)
-	}
+	inputCompanies := len(opts.Companies)
 	opts.Roles = append([]string(nil), opts.Roles...)
 	if err := normalizeContactOptions(&opts); err != nil {
 		return nil, err
 	}
 	r := &ContactReport{RetrievedAt: time.Now().UTC().Format(time.RFC3339), Complete: true, Roles: opts.Roles, Concurrency: opts.Concurrency, ContactFilter: opts.ContactFilter,
-		Notes: []string{"Contacts are provider-reported, not independently verified. B2B emails are restricted to the matched employer domain; unrelated work emails are omitted.", "Email validation is separate from contact availability. Direct dials are person-level numbers; line type and company association are not verified.", "Current employment is a cached observation. Missing, old, inferred or conflicting evidence is marked for review.", "All discovered people use contacts, including unavailable and not-enriched rows. Filters affect returned rows, not company-level coverage or errors."}}
+		CompanyMerge: &CompanyMergeSummary{InputRecords: inputCompanies, UniqueCompanies: len(opts.Companies), DuplicatesMerged: inputCompanies - len(opts.Companies)},
+		Notes:        []string{"Contacts are provider-reported, not independently verified. B2B emails are restricted to the matched employer domain; unrelated work emails are omitted.", "Email validation is separate from contact availability. Direct dials are person-level numbers; line type and company association are not verified.", "Current employment is a cached observation. Missing, old, inferred or conflicting evidence is marked for review.", "All discovered people use contacts, including unavailable and not-enriched rows. Filters affect returned rows, not company-level coverage or errors."}}
 	for _, co := range opts.Companies {
 		r.Companies = append(r.Companies, CompanyContactResult{Company: co, Status: "not_processed", Contacts: []BusinessContact{}, Issues: []ContactIssue{}})
 	}
@@ -397,9 +398,9 @@ func (c *Client) enrichContact(ctx context.Context, company CompanyTarget, candi
 		candidate.PhoneStatus = "redacted"
 		return nil
 	}
-	domain := company.Domain
-	if domain == "" {
-		domain = candidate.Employment.Domain
+	domains := companyDomains(company)
+	if len(domains) == 0 && candidate.Employment.Domain != "" {
+		domains = []string{candidate.Employment.Domain}
 	}
 	candidate.EmailStatus = contactFieldStatus(profile, "b2b_emails")
 	seenEmail := map[string]bool{}
@@ -411,7 +412,7 @@ func (c *Client) enrichContact(ctx context.Context, company CompanyTarget, candi
 		}
 		_, emailDomain, ok := strings.Cut(email, "@")
 		emailDomain = cleanDomain(emailDomain)
-		if !ok || domain == "" || emailDomain != domain || seenEmail[strings.ToLower(email)] {
+		if !ok || !containsString(domains, emailDomain) || seenEmail[strings.ToLower(email)] {
 			continue
 		}
 		seenEmail[strings.ToLower(email)] = true
@@ -546,7 +547,7 @@ func matchesContactCompany(c CompanyTarget, e map[string]any) bool {
 			return true
 		}
 	}
-	return c.Domain != "" && cleanDomain(str(e["domain"])) == c.Domain
+	return containsString(companyDomains(c), cleanDomain(str(e["domain"])))
 }
 func matchesRole(title string, roles []string) bool { return roleRank(title, roles) < len(roles) }
 func roleRank(title string, roles []string) int {
@@ -587,9 +588,6 @@ func contactFieldStatus(m map[string]any, key string) string {
 }
 
 func normalizeContactOptions(o *ContactOptions) error {
-	if len(o.Companies) == 0 || len(o.Companies) > 25 {
-		return errors.New("contacts requires 1..25 companies per run")
-	}
 	if o.Concurrency == 0 {
 		o.Concurrency = 4
 	}
@@ -638,35 +636,14 @@ func normalizeContactOptions(o *ContactOptions) error {
 			return errors.New("role phrases must contain 1..100 characters")
 		}
 	}
-	for i := range o.Companies {
-		co := &o.Companies[i]
-		if co.Domain != "" {
-			co.Domain = cleanDomain(co.Domain)
-			if !strings.Contains(co.Domain, ".") {
-				return errors.New("company domain must be a valid domain name")
-			}
-		}
-		if len(co.CompanyIDs) == 0 && co.Domain == "" {
-			return errors.New("each company needs company_ids or domain; name alone is ambiguous")
-		}
-		if len(co.CompanyIDs) > 10 {
-			return errors.New("maximum 10 IDs per company")
-		}
-		seen := map[string]bool{}
-		ids := []string{}
-		for _, id := range co.CompanyIDs {
-			n, e := strconv.ParseInt(id, 10, 64)
-			if e != nil || n <= 0 {
-				return errors.New("company IDs must be positive integers")
-			}
-			id = strconv.FormatInt(n, 10)
-			if !seen[id] {
-				ids = append(ids, id)
-				seen[id] = true
-			}
-		}
-		co.CompanyIDs = ids
+	companies, err := MergeCompanyTargets(o.Companies)
+	if err != nil {
+		return err
 	}
+	if len(companies) > 25 {
+		return errors.New("contacts supports at most 25 unique companies after merging")
+	}
+	o.Companies = companies
 	return nil
 }
 
@@ -675,8 +652,8 @@ func contactSearch(co CompanyTarget, o ContactOptions) map[string]any {
 	if len(co.CompanyIDs) > 0 {
 		identifiers = append(identifiers, map[string]any{"terms": map[string]any{"experience.company_id": co.CompanyIDs}})
 	}
-	if co.Domain != "" {
-		identifiers = append(identifiers, map[string]any{"term": map[string]any{"experience.domain.keyword": co.Domain}})
+	if domains := companyDomains(co); len(domains) > 0 {
+		identifiers = append(identifiers, map[string]any{"terms": map[string]any{"experience.domain.keyword": domains}})
 	}
 	roles := []any{}
 	for i, r := range o.Roles {
@@ -723,6 +700,12 @@ func ParseCompanyTargets(reader io.Reader) ([]CompanyTarget, error) {
 			m = co
 		}
 		co := CompanyTarget{Name: str(m["name"]), Domain: str(m["domain"]), Qualification: str(m["qualification_status"])}
+		for _, v := range array(m["name_aliases"]) {
+			co.NameAliases = append(co.NameAliases, str(v))
+		}
+		for _, v := range array(m["domain_aliases"]) {
+			co.DomainAliases = append(co.DomainAliases, str(v))
+		}
 		if co.Name == "" {
 			co.Name = str(m["company_name"])
 		}
