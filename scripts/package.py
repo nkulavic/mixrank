@@ -2,7 +2,7 @@
 """Generate synchronized agent packages; --release adds native binaries and archives."""
 import argparse,hashlib,json,os,pathlib,shutil,subprocess,tarfile,zipfile
 root=pathlib.Path(__file__).resolve().parents[1];version='0.1.0'
-ap=argparse.ArgumentParser();ap.add_argument('--release',action='store_true');ap.add_argument('--check',action='store_true');args=ap.parse_args()
+ap=argparse.ArgumentParser();ap.add_argument('--release',action='store_true');ap.add_argument('--reuse-binaries',action='store_true',help='Repackage already-built binaries without recompiling');ap.add_argument('--check',action='store_true');args=ap.parse_args()
 def write(path,data):
  p=root/path;p.parent.mkdir(parents=True,exist_ok=True);b=json.dumps(data,indent=2)+'\n'
  if args.check:
@@ -36,13 +36,18 @@ dist=root/'dist';dist.mkdir(exist_ok=True)
 for goos in ['darwin','linux','windows']:
  for arch in ['amd64','arm64']:
   ext='.exe' if goos=='windows' else '';folder=dist/f'mixrank_{version}_{goos}_{arch}';folder.mkdir(exist_ok=True);binary=folder/('mixrank'+ext)
-  subprocess.run(['go','build','-trimpath','-ldflags','-s -w -buildid=','-o',str(binary),'./cmd/mixrank'],cwd=root,env={**os.environ,'GOOS':goos,'GOARCH':arch,'CGO_ENABLED':'0'},check=True)
+  if not args.reuse_binaries:subprocess.run(['go','build','-trimpath','-ldflags','-s -w -buildid=','-o',str(binary),'./cmd/mixrank'],cwd=root,env={**os.environ,'GOOS':goos,'GOARCH':arch,'CGO_ENABLED':'0'},check=True)
   if goos=='windows':
-   with zipfile.ZipFile(str(folder)+'.zip','w',zipfile.ZIP_DEFLATED) as z:z.write(binary,binary.name)
+   with zipfile.ZipFile(str(folder)+'.zip','w',zipfile.ZIP_DEFLATED) as z:
+    z.write(binary,binary.name)
+    for notice in ['LICENSE','THIRD_PARTY_NOTICES.txt']:z.write(root/notice,notice)
   else:
-   with tarfile.open(str(folder)+'.tar.gz','w:gz') as t:t.add(binary,arcname='mixrank')
+   with tarfile.open(str(folder)+'.tar.gz','w:gz') as t:
+    t.add(binary,arcname='mixrank')
+    for notice in ['LICENSE','THIRD_PARTY_NOTICES.txt']:t.add(root/notice,arcname=notice)
   # Native Desktop extension; one architecture per package avoids host ambiguity.
   bundle=dist/f'mcpb-{goos}-{arch}';bundle.mkdir(exist_ok=True);shutil.copy2(binary,bundle/binary.name)
+  for notice in ['LICENSE','THIRD_PARTY_NOTICES.txt']:shutil.copy2(root/notice,bundle/notice)
   mf={'manifest_version':'0.3','name':'mixrank','display_name':'MixRank','version':version,'description':base['description'],'author':base['author'],'homepage':base['homepage'],'license':'MIT','server':{'type':'binary','entry_point':binary.name,'mcp_config':{'command':'${__dirname}/'+binary.name,'args':['mcp'],'env':{'MIXRANK_API_KEY':'${user_config.api_key}'}}},'compatibility':{'platforms':['win32' if goos=='windows' else goos]},'user_config':{'api_key':{'type':'string','title':'MixRank API key','description':'Your API key, stored by Claude Desktop','sensitive':True,'required':True}}}
   (bundle/'manifest.json').write_text(json.dumps(mf,indent=2)+'\n')
   with zipfile.ZipFile(dist/f'mixrank_{goos}_{arch}.mcpb','w',zipfile.ZIP_DEFLATED) as z:
@@ -50,6 +55,7 @@ for goos in ['darwin','linux','windows']:
 # Cache-independent universal plugin bundles.
 for label,source in [('codex',root/'plugins/mixrank'),('claude',root/'plugins/claude/mixrank')]:
  with zipfile.ZipFile(dist/f'mixrank-{label}.zip','w',zipfile.ZIP_DEFLATED) as z:
+  for notice in ['LICENSE','THIRD_PARTY_NOTICES.txt']:z.write(root/notice,notice)
   for f in source.rglob('*'):
    if f.is_file():z.write(f,f.relative_to(source))
   for goos in ['darwin','linux','windows']:
@@ -65,6 +71,7 @@ for label,source in [('codex',root/'plugins/mixrank'),('claude',root/'plugins/cl
    if label=='claude':config['mcpServers']['mixrank']['env']={'MIXRANK_API_KEY':'${user_config.api_key}'}
    else:config['mcpServers']['mixrank'].update({'env_vars':['MIXRANK_API_KEY'],'cwd':'.'})
    with zipfile.ZipFile(dist/f'mixrank-{label}-{goos}-{arch}.zip','w',zipfile.ZIP_DEFLATED) as z:
+    for notice in ['LICENSE','THIRD_PARTY_NOTICES.txt']:z.write(root/notice,notice)
     for f in source.rglob('*'):
      if f.is_file() and f.name not in ['.mcp.json','mcp.json'] and 'bin' not in f.relative_to(source).parts:z.write(f,f.relative_to(source))
     z.writestr('.mcp.json',json.dumps(config,indent=2));
@@ -73,6 +80,7 @@ for label,source in [('codex',root/'plugins/mixrank'),('claude',root/'plugins/cl
 
 # Cowork gets portable skills, not a falsely host-bound Desktop MCP launcher.
 with zipfile.ZipFile(dist/'mixrank-cowork.zip','w',zipfile.ZIP_DEFLATED) as z:
+ z.write(root/'LICENSE','LICENSE')
  manifest={k:v for k,v in base.items()};manifest['skills']='./skills';z.writestr('.claude-plugin/plugin.json',json.dumps(manifest,indent=2))
  for f in (root/'skills').rglob('*'):
   if f.is_file():z.write(f,f.relative_to(root))
