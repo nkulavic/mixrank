@@ -29,6 +29,15 @@ mixrank api search-companies --body query.json
 
 [Operation reference](skills/mixrank-cli/references/operations.md) · [CLI recipes](skills/mixrank-cli/references/recipes.md) · [credentials](docs/credentials.md) · [validation status](docs/validation.md)
 
+For follow-up, turn the company results into actual contact records:
+
+```sh
+mixrank contacts --companies companies.json --output contacts.json
+mixrank contacts --domain example.com --max-contacts 2
+```
+
+This finds current relevant people and retrieves available business emails and direct dials, with source dates, missing-data statuses and review flags. The SDK and MCP expose the same workflow through `CompanyContacts` and `mixrank_company_contacts`. [Contact workflow](docs/contacts.md).
+
 ## SDK and MCP
 
 ```go

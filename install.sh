@@ -1,7 +1,7 @@
 #!/bin/sh
 # Download this script from a tagged release, review it, then run: sh install.sh
 set -eu
-VERSION=0.1.0
+VERSION=0.2.0
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 case $(uname -m) in x86_64|amd64) ARCH=amd64;; arm64|aarch64) ARCH=arm64;; *) echo 'Unsupported architecture' >&2; exit 2;; esac
 case "$OS" in darwin|linux) ;; *) echo 'Use install.ps1 on Windows' >&2; exit 2;; esac

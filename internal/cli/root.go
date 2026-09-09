@@ -22,11 +22,11 @@ import (
 	"time"
 )
 
-var Version = "0.1.0"
+var Version = "0.2.0"
 
 func New() *cobra.Command {
 	root := &cobra.Command{Use: "mixrank", Short: "MixRank API, research skills and MCP toolkit", Version: Version, SilenceUsage: true, SilenceErrors: true}
-	root.AddCommand(auth(), endpoints(), api(), request(), mcpCommand(), doctor(), setupCommand(), personalizeCommand(), profilesCommand(), downloadCommand(), validationCommand())
+	root.AddCommand(auth(), endpoints(), api(), request(), mcpCommand(), doctor(), setupCommand(), personalizeCommand(), profilesCommand(), downloadCommand(), validationCommand(), contactsCommand())
 	return root
 }
 func client(ctx context.Context) (*mixrank.Client, error) {

@@ -27,6 +27,12 @@ Known boundaries for the initial release:
 - HTTP bearer development mode is tested. Production OAuth and provider deployment remain deferred as planned.
 - Private personalization is an agent-assisted draft/review workflow. Merely registering source locations does not claim that the product has been analyzed.
 
+## Contact workflow, v0.2.0
+
+The SDK, CLI and MCP share one company-to-contact implementation. Synthetic tests cover nested current-employer/role evidence, contradictory employers, inferred and stale associations, domain-filtered work emails, phone/email deduplication, continuing past people without contact data, request budgets, permission failures with partial reports, numeric precision in company imports, and output-file overwrite prevention. An MCP client invokes the complete workflow through its registered tool. Discovery now includes 104 tools: 102 provider operations, the catalog, and the contact workflow.
+
+Contact enrichment is distinct from email validation. The contact workflow does not guess emails, request consumer email add-ons, send messages or silently trigger live refresh. The Illinois roofing live test uses private exports outside the repository; production contact values are not test fixtures.
+
 ## Catalog maintenance
 
 Review newly signed-in documentation and provider revisions privately. Update factual names, types, parameters, operational notes and source dates in `catalog/endpoints.json` and mappings. Keep raw documentation snapshots outside the repository. Run `scripts/generate.py`, `scripts/package.py`, tests and their `--check` modes. A new undisclosed or account-inaccessible endpoint should be recorded as a limitation, not assigned a fabricated contract.

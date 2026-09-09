@@ -20,7 +20,7 @@ type ClientFactory func(context.Context) (*mixrank.Client, error)
 const MaxOutputBytes int64 = 1 << 20
 
 func New(factory ClientFactory) *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "mixrank", Version: "0.1.0"}, nil)
+	s := mcp.NewServer(&mcp.Implementation{Name: "mixrank", Version: "0.2.0"}, nil)
 	for _, op := range catalog.Read().Operations {
 		props := map[string]any{}
 		required := []string{}
@@ -110,6 +110,7 @@ func New(factory ClientFactory) *mcp.Server {
 		}
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}}, nil
 	})
+	addContactTool(s, factory)
 	return s
 }
 func validIndex(s string) bool {

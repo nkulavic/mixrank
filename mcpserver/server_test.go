@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHTTPMCPDiscoveryCallAndAuth(t *testing.T) {
@@ -56,7 +57,7 @@ func TestHTTPMCPDiscoveryCallAndAuth(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(tools.Tools) != len(catalog.Read().Operations)+1 {
+	if len(tools.Tools) != len(catalog.Read().Operations)+1+WorkflowToolCount {
 		t.Fatal("parity", len(tools.Tools))
 	}
 	out, e := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "get_echo", Arguments: map[string]any{}})
@@ -70,6 +71,45 @@ func TestHTTPMCPDiscoveryCallAndAuth(t *testing.T) {
 }
 
 type bearerTransport struct{ token string }
+
+func TestMCPContactWorkflow(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/_search") {
+			fmt.Fprintf(w, `{"hits":{"total":{"value":1,"relation":"eq"},"hits":[{"_id":"7","_source":{"person_id":7,"name":{"full":"Avery Morgan"},"updated_at":%q},"inner_hits":{"experience":{"hits":{"hits":[{"_source":{"company_id":123,"company_name":"Example","domain":"example.test","title":"Owner","is_current":true,"has_source_company_id":true}}]}}}}]}}`, time.Now().UTC().Format(time.RFC3339))
+			return
+		}
+		if r.URL.Query().Get("enable") != "b2b_emails,directdials" {
+			t.Error("contact add-ons missing")
+		}
+		fmt.Fprint(w, `{"id":7,"b2b_emails":[{"email":"avery@example.test"}],"directdials":["+12025550123"]}`)
+	}))
+	defer upstream.Close()
+	c, _ := mixrank.New("synthetic", mixrank.Options{BaseURL: upstream.URL})
+	s := New(func(context.Context) (*mixrank.Client, error) { return c, nil })
+	a, b := mcp.NewInMemoryTransports()
+	ss, e := s.Connect(context.Background(), a, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer ss.Close()
+	client := mcp.NewClient(&mcp.Implementation{Name: "workflow-test", Version: "1"}, nil)
+	cs, e := client.Connect(context.Background(), b, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer cs.Close()
+	r, e := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "mixrank_company_contacts", Arguments: map[string]any{"companies": []any{map[string]any{"company_ids": []int{123}, "domain": "example.test"}}, "max_contacts_per_company": 1}})
+	if e != nil || r.IsError {
+		t.Fatal(e, r)
+	}
+	var report mixrank.ContactReport
+	if e = json.Unmarshal([]byte(r.Content[0].(*mcp.TextContent).Text), &report); e != nil {
+		t.Fatal(e)
+	}
+	if report.Companies[0].Contacts[0].BusinessEmails[0].Email != "avery@example.test" || report.RequestsMade != 2 {
+		t.Fatal("workflow did not enrich contacts")
+	}
+}
 
 func (b bearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	r = r.Clone(r.Context())

@@ -28,7 +28,7 @@ func TestInstalledPluginStdio(t *testing.T) {
 	}
 	defer session.Close()
 	tools, e := session.ListTools(ctx, nil)
-	if e != nil || len(tools.Tools) != len(catalog.Read().Operations)+1 {
+	if e != nil || len(tools.Tools) != len(catalog.Read().Operations)+1+WorkflowToolCount {
 		t.Fatal("discovery", e)
 	}
 	r, e := session.CallTool(ctx, &mcp.CallToolParams{Name: "mixrank_catalog", Arguments: map[string]any{"operation": "get_person_match"}})

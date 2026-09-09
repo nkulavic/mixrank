@@ -33,7 +33,7 @@ jobs:
       - name: Verify native installer completion
         env:
           MIXRANK_API_KEY: synthetic-ci-credential
-        run: ./dist/mixrank_0.1.0_linux_amd64/mixrank setup --components cli --destination "$RUNNER_TEMP/mixrank-install" --yes
+        run: ./dist/mixrank_0.2.0_linux_amd64/mixrank setup --components cli --destination "$RUNNER_TEMP/mixrank-install" --yes
       - uses: actions/upload-artifact@v4
         with:
           name: release-builds
