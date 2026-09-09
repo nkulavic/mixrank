@@ -6,6 +6,18 @@ Local tests use synthetic fixtures for request encoding, multipart upload, numer
 
 Client validation is reported separately from compilation. Manifest acceptance and a successful MCP handshake do not prove every GUI import flow, permission set or provider data condition. Desktop MCPB/Cowork UI imports and real remote OAuth logins need the corresponding user client environment. Native packages are cross-built for macOS/Linux/Windows amd64 and arm64. Windows/Linux OS-vault runtime tests depend on those operating systems and an available secret store.
 
+## Completed checks
+
+- GitHub Actions on macOS, Windows and Linux: race-enabled Go tests, `go vet`, generated SDK/reference checks, synchronized plugin checks and catalog/skill invariants. See the [test runs](https://github.com/nkulavic/mixrank/actions/workflows/ci.yml) for commit-specific results.
+- Six native targets compiled; 23 ZIP/MCPB archives checked for duplicate entries, unsafe paths, required license notices and matching release checksums.
+- Codex personal plugin installed using its real cache directory; official SDK stdio handshake, discovery of 103 tools (102 operations plus catalog), and a catalog call passed from an unrelated working directory.
+- Claude Code plugin and marketplace passed its strict manifest validator and the plugin installed. Its required sensitive API-key setting remains a host UI step: `/plugin configure mixrank@mixrank-toolkit`.
+- Native macOS MCPB manifest passed the official MCPB validator and its bundled executable passed the same stdio test. The Desktop import UI was not exercised.
+- MixRank-owned macOS Keychain save/read/replace/delete passed with an isolated synthetic entry. The authorized implementation credential was saved through the CLI workflow, status reported only its source, and one bounded live `/echo` check succeeded.
+- Four portable skills passed structural validation. Research scenarios were reviewed against synthetic fixtures in the [workflow evaluation](workflow-evaluation.md); this was not an autonomous model benchmark.
+
+No real validation lists, live-fetch campaigns, customer exports, product personalization or outbound messages were run during these checks. Windows Credential Manager and Linux Secret Service integration still need vault-enabled runtime checks; the portable test suite does not simulate a successful unlocked OS vault.
+
 Known boundaries for the initial release:
 
 - Full documented request/response field access is generated; response data remains raw JSON with preserved numbers instead of hundreds of rigid structs that discard newly returned fields.

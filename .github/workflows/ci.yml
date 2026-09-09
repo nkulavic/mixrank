@@ -30,6 +30,10 @@ jobs:
         with:
           go-version-file: go.mod
       - run: python3 scripts/package.py --release
+      - name: Verify native installer completion
+        env:
+          MIXRANK_API_KEY: synthetic-ci-credential
+        run: ./dist/mixrank_0.1.0_linux_amd64/mixrank setup --components cli --destination "$RUNNER_TEMP/mixrank-install" --yes
       - uses: actions/upload-artifact@v4
         with:
           name: release-builds

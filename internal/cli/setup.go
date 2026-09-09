@@ -120,6 +120,7 @@ func setupCommand() *cobra.Command {
 			}
 		}
 		d := doctor()
+		d.SetArgs([]string{})
 		d.SetOut(c.OutOrStdout())
 		d.SetErr(c.ErrOrStderr())
 		return d.ExecuteContext(c.Context())

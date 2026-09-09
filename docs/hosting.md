@@ -9,3 +9,11 @@ Build and validation precede deployment. The user's paid Vercel account is the f
 A scaled service must coordinate all one-off email validations using the same upstream credential across instances or disable that operation in favor of bulk jobs. Pending callback state also needs a shared store for asynchronous one-offs. In-process stateless behavior is not a distributed lock. Hosted secrets are injected by the provider, never uploaded from local keychains. Remote clients own their login tokens independently of the upstream MixRank API key.
 
 References: [Vercel Go runtime](https://vercel.com/docs/functions/runtimes/go), [MCP authorization](https://modelcontextprotocol.io/specification/latest/basic/authorization), [OpenAI plugin authentication](https://developers.openai.com/plugins/build/auth).
+
+## Vercel readiness review, September 9, 2026
+
+Vercel documents a beta Go runtime on all plans. Its Go framework preset detects a root `go.mod` and `main.go`, `cmd/api/main.go`, or `cmd/server/main.go`; a server entrypoint must listen on `PORT`. The existing exported MCP handler can be used by that later entrypoint. [Go runtime documentation](https://vercel.com/docs/functions/runtimes/go).
+
+The general function limits list a 4.5 MB request/response payload limit and 250 MB uncompressed bundle limit. The toolkit's HTTP input bound is 4 MiB and individual tool output bound is 1 MiB; large uploads and downloads should stay outside the MCP function. The published 800-second Pro duration table specifically describes Node.js, Bun and Python, so it is not evidence of the Go runtime's exact duration or streaming behavior. Verify those on the selected project before activation. [Function limits](https://vercel.com/docs/functions/limitations).
+
+Vercel CLI 59.13.1 reported logged out on the implementation machine. The user has stated that their account is paid, but account settings and deployment behavior were not verified. No Vercel project, deployment, server secret or connector was created. The next phase needs account authentication, a selected OAuth provider and client login tests before production activation.
