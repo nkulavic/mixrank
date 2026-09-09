@@ -1,0 +1,15 @@
+{
+  "name": "mixrank-toolkit",
+  "description": "Native MixRank tools and research skills for coding agents",
+  "owner": {
+    "name": "Nick Kulavic"
+  },
+  "plugins": [
+    {
+      "name": "mixrank",
+      "source": "./plugins/claude/mixrank",
+      "version": "0.1.0",
+      "description": "MixRank API tools, CLI recipes and evidence-based research workflows"
+    }
+  ]
+}

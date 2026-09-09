@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "mixrank": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/run-mixrank",
+      "args": [
+        "mcp"
+      ],
+      "env": {
+        "MIXRANK_API_KEY": "${user_config.api_key}"
+      }
+    }
+  }
+}

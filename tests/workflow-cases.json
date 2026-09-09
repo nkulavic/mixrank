@@ -1,0 +1,34 @@
+{
+  "synthetic": true,
+  "cases": [
+    {
+      "id": "ambiguous-vertical",
+      "objective": "Find healthtech software vendors with current engineering leadership for a hypothetical API tooling product",
+      "profile": {"capabilities": ["API development tooling"], "exclusions": ["care providers without a software business"]},
+      "companies": [
+        {"id": 201, "name": "Aster Clinic", "domain": "clinic.example.test", "description": "Outpatient care provider", "software_business": null},
+        {"id": 202, "name": "Aster Systems", "domain": "aster.example.test", "description": "Healthcare software vendor", "software_business": true},
+        {"id": 202, "name": "Aster Systems Inc", "domain": "aster.example.test", "description": "Duplicate input row", "software_business": true}
+      ],
+      "expected_decisions": {"separate_vertical_interpretations": true, "unique_resolved_accounts": [202], "unknown_or_excluded_accounts": [201], "deduplicate_id": 202, "buying_intent": "unknown"}
+    },
+    {
+      "id": "stale-and-crossed-employment",
+      "target_company_id": 202,
+      "people": [
+        {"person_id": 301, "name": "Synthetic Person One", "experience": [{"company_id": 202, "title": "VP Engineering", "is_current": false, "end_date": "2023-05-01"}, {"company_id": 203, "title": "VP Engineering", "is_current": true}]},
+        {"person_id": 302, "name": "Synthetic Person Two", "experience": [{"company_id": 202, "title": "Director of Engineering", "is_current": true}], "b2b_emails": {}},
+        {"person_id": 303, "name": "Synthetic Person Three", "experience": [{"company_id": 202, "title": "Designer", "is_current": true}, {"company_id": 204, "title": "Director of Engineering", "is_current": true}]}
+      ],
+      "expected_decisions": {"relevant_current_people": [302], "historical_only": [301], "crossed_nested_match_rejected": [303], "contact_deliverability": "unknown", "empty_contact_object": "add-on not enabled, not evidence of absence"}
+    },
+    {
+      "id": "ambiguous-match-and-partial-enrichment",
+      "inputs": [{"row_id": "r1", "company_name": "Aster", "domain": "conflicting.example.test"}, {"row_id": "r2", "company_id": 202}],
+      "matches": {"r1": [{"id": 202, "score": 0.6}, {"id": 205, "score": 0.6}], "r2": [{"id": 202, "score": 1.0}]},
+      "validation_job": {"id": "synthetic-job", "completed_at": null, "download_url": null},
+      "history": [{"date": "2022-01-01", "employee_count": 10}, {"date": "2025-05-01", "employee_count": null}],
+      "expected_decisions": {"unresolved_rows": ["r1"], "resolved_rows": ["r2"], "resubmit_job": false, "invent_missing_headcount": false, "completed_validation": false}
+    }
+  ]
+}

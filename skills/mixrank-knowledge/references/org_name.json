@@ -1,0 +1,74 @@
+{
+  "mappings": {
+    "properties": {
+      "id": {
+        "type": "long"
+      },
+      "name_key": {
+        "type": "long"
+      },
+      "org_rank": {
+        "type": "long"
+      },
+      "has_linkedin": {
+        "type": "boolean"
+      },
+      "linkedin_company_id": {
+        "type": "long"
+      },
+      "linkedin_company_count": {
+        "type": "long"
+      },
+      "linkedin_profile_position_count": {
+        "type": "long"
+      },
+      "linkedin_profile_education_count": {
+        "type": "long"
+      },
+      "indeed_profile_position_count": {
+        "type": "long"
+      },
+      "indeed_profile_education_count": {
+        "type": "long"
+      },
+      "ios_app_count": {
+        "type": "long"
+      },
+      "itunes_artist_count": {
+        "type": "long"
+      },
+      "play_app_count": {
+        "type": "long"
+      },
+      "play_store_developer_count": {
+        "type": "long"
+      },
+      "ssl_cert_count": {
+        "type": "long"
+      },
+      "ticker_symbol_count": {
+        "type": "long"
+      },
+      "aad_tenant_count": {
+        "type": "long"
+      },
+      "gsa_contractor_count": {
+        "type": "long"
+      },
+      "name": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          },
+          "autocomplete": {
+            "type": "text",
+            "analyzer": "autocomplete",
+            "search_analyzer": "standard"
+          }
+        }
+      }
+    }
+  }
+}

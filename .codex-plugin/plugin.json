@@ -1,0 +1,20 @@
+{
+  "name": "mixrank",
+  "version": "0.1.0",
+  "description": "MixRank API tools, CLI recipes and evidence-based research workflows",
+  "author": {
+    "name": "Nick Kulavic",
+    "url": "https://github.com/nkulavic"
+  },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "MixRank",
+    "shortDescription": "Research companies and people with MixRank.",
+    "longDescription": "Company and person discovery, enrichment, validation, technology research and private product context through a Go CLI and MCP server.",
+    "developerName": "Nick Kulavic",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Research companies and people with MixRank using my criteria."
+  }
+}

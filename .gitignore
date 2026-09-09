@@ -1,0 +1,11 @@
+/dist/
+/bin/
+*.test
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+.mixrank/
+/mixrank
+/plugins/**/bin/

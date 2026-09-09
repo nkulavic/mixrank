@@ -1,0 +1,11 @@
+# HTTP and deployment sequence
+
+The Go MCP SDK serves stateless Streamable HTTP at `/mcp`. The exported `mcpserver.Handler` can be embedded in a Go HTTP function or service. It requires an auth callback or a distinct bearer token, validates explicit origins, enforces request/output limits, propagates cancellation, and sets `Cache-Control: no-store`. Upstream credentials are resolved from server environment variables for CLI HTTP mode; no local credential vault or persistent disk is required. Process-local one-off validation coordination does not cover multiple instances.
+
+A private bearer configuration is available for local integration testing. This is not OAuth and must not be advertised as a production Claude/Cowork connector. Production activation requires OAuth 2.1-compatible client flows, protected-resource metadata, issuer/audience/expiry/scope validation, appropriate registration/PKCE behavior, and tests in the actual target clients. The exported Authorize callback is the integration boundary, not an implemented authorization server.
+
+Build and validation precede deployment. The user's paid Vercel account is the first candidate; inspect current Go runtime support, function duration, streaming behavior, size limits and account settings before selecting a deployment. Vercel configuration and provider-managed secrets must be created only in that later phase. Long operations should submit a job and later inspect/download it instead of holding a function open. Receiver hosting and webhook persistence belong to deployment or the consuming application.
+
+A scaled service must coordinate all one-off email validations using the same upstream credential across instances or disable that operation in favor of bulk jobs. Pending callback state also needs a shared store for asynchronous one-offs. In-process stateless behavior is not a distributed lock. Hosted secrets are injected by the provider, never uploaded from local keychains. Remote clients own their login tokens independently of the upstream MixRank API key.
+
+References: [Vercel Go runtime](https://vercel.com/docs/functions/runtimes/go), [MCP authorization](https://modelcontextprotocol.io/specification/latest/basic/authorization), [OpenAI plugin authentication](https://developers.openai.com/plugins/build/auth).

@@ -1,0 +1,20 @@
+{
+  "name": "mixrank-toolkit",
+  "interface": {
+    "displayName": "MixRank Toolkit"
+  },
+  "plugins": [
+    {
+      "name": "mixrank",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mixrank"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

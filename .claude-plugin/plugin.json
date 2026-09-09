@@ -1,0 +1,23 @@
+{
+  "name": "mixrank",
+  "version": "0.1.0",
+  "description": "MixRank API tools, CLI recipes and evidence-based research workflows",
+  "author": {
+    "name": "Nick Kulavic",
+    "url": "https://github.com/nkulavic"
+  },
+  "homepage": "https://github.com/nkulavic/mixrank",
+  "repository": "https://github.com/nkulavic/mixrank",
+  "license": "MIT",
+  "skills": "./skills",
+  "mcpServers": "./.mcp.json",
+  "userConfig": {
+    "api_key": {
+      "type": "string",
+      "title": "MixRank API key",
+      "description": "Your MixRank API credential. Claude manages secure storage.",
+      "sensitive": true,
+      "required": true
+    }
+  }
+}

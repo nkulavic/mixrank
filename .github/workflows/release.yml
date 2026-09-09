@@ -1,0 +1,26 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test -race -timeout 180s ./...
+      - run: go vet ./...
+      - run: python3 scripts/generate.py --check
+      - run: python3 scripts/package.py --check
+      - run: python3 scripts/verify.py
+      - run: python3 scripts/package.py --release
+      - name: Publish native binaries and agent packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "MixRank $GITHUB_REF_NAME" --notes-file docs/release-notes.md dist/*.tar.gz dist/*.zip dist/*.mcpb dist/checksums.txt dist/install.sh dist/install.ps1

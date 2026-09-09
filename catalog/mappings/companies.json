@@ -1,0 +1,201 @@
+{
+  "mappings": {
+    "properties": {
+      "company_id": {
+        "type": "long"
+      },
+      "company_linkedin_id": {
+        "type": "long"
+      },
+      "account_id": {
+        "type": "long"
+      },
+      "company_name": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "company_headline": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "company_size": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "company_type": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "slug": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "score": {
+        "type": "float"
+      },
+      "employee_count": {
+        "type": "long"
+      },
+      "follower_count": {
+        "type": "long"
+      },
+      "founded": {
+        "type": "long"
+      },
+      "updated_at": {
+        "type": "date"
+      },
+      "logo": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "website": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "domain": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "description": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "specialties": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "locality": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "region": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "country_code": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "country_iso": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "naics_codes": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "sic_codes": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "employee_growth_01mo": {
+        "type": "float"
+      },
+      "employee_growth_03mo": {
+        "type": "float"
+      },
+      "employee_growth_06mo": {
+        "type": "float"
+      },
+      "employee_growth_09mo": {
+        "type": "float"
+      },
+      "employee_growth_12mo": {
+        "type": "float"
+      },
+      "employee_growth_24mo": {
+        "type": "float"
+      },
+      "employee_growth_36mo": {
+        "type": "float"
+      },
+      "employee_growth_48mo": {
+        "type": "float"
+      },
+      "employee_growth_60mo": {
+        "type": "float"
+      }
+    }
+  }
+}

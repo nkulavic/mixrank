@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "mixrank": {
+      "command": "./scripts/run-mixrank",
+      "cwd": ".",
+      "args": [
+        "mcp"
+      ],
+      "env_vars": [
+        "MIXRANK_API_KEY"
+      ]
+    }
+  }
+}
