@@ -57,7 +57,7 @@ for label,source in [('codex',root/'plugins/mixrank'),('claude',root/'plugins/cl
  with zipfile.ZipFile(dist/f'mixrank-{label}.zip','w',zipfile.ZIP_DEFLATED) as z:
   for notice in ['LICENSE','THIRD_PARTY_NOTICES.txt']:z.write(root/notice,notice)
   for f in source.rglob('*'):
-   if f.is_file():z.write(f,f.relative_to(source))
+   if f.is_file() and 'bin' not in f.relative_to(source).parts:z.write(f,f.relative_to(source))
   for goos in ['darwin','linux','windows']:
    for arch in ['amd64','arm64']:
     name='mixrank'+('.exe' if goos=='windows' else '');z.write(dist/f'mixrank_{version}_{goos}_{arch}'/name,f'bin/{goos}_{arch}/{name}')

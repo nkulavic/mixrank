@@ -20,6 +20,12 @@ func setupCommand() *cobra.Command {
 	var components string
 	var yes, upgrade, repair, uninstall, removeCredentials, removeProfiles bool
 	c := &cobra.Command{Use: "setup", Short: "Interactive installation, dry runs, upgrade, repair and uninstall", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+		if (upgrade && repair) || (upgrade && uninstall) || (repair && uninstall) {
+			return errors.New("select one of upgrade, repair or uninstall")
+		}
+		if (removeCredentials || removeProfiles) && !uninstall {
+			return errors.New("private-data removal flags require --uninstall")
+		}
 		if upgrade {
 			o.Action = "upgrade"
 		}
@@ -93,7 +99,13 @@ func setupCommand() *cobra.Command {
 		}
 		if interactive {
 			_, _, e := credentials.Resolve()
-			if e != nil && strings.EqualFold(ask("Configure the MixRank OS-vault API key now? [y/N]: "), "y") {
+			ownAuth := false
+			for _, comp := range o.Components {
+				if comp == "cli" || comp == "skills" || comp == "codex-plugin" || comp == "codex-mcp" || comp == "claude-mcp" || comp == "generic" {
+					ownAuth = true
+				}
+			}
+			if ownAuth && e != nil && strings.EqualFold(ask("Configure the MixRank OS-vault API key now? [y/N]: "), "y") {
 				cmd := auth()
 				cmd.SetArgs([]string{"login"})
 				cmd.SetIn(c.InOrStdin())

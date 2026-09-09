@@ -82,7 +82,7 @@ func Plan(o Options) ([]Step, error) {
 		return nil, e
 	}
 	localRoot := filepath.Join(configStore.Root, "agent-packages")
-	needsBinary := seen["cli"] || seen["codex-mcp"] || seen["claude-mcp"] || seen["generic"]
+	needsBinary := seen["cli"] || seen["codex-mcp"] || seen["claude-mcp"] || seen["generic"] || seen["skills"]
 	if needsBinary {
 		steps = append(steps, Step{Component: "cli", Destination: binary})
 	}
