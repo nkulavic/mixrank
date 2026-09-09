@@ -19,7 +19,7 @@ func newContactsCommand(factory func(context.Context) (*mixrank.Client, error)) 
 	var input, output, domain, name string
 	var ids []string
 	var timeout time.Duration
-	c := &cobra.Command{Use: "contacts", Short: "Find current company contacts and retrieve available business emails and direct dials", Long: "Discover current owners and relevant managers, append B2B emails and direct dials, and return one JSON report. Accepts a company array, a companies export, or raw Elasticsearch company hits. Keeps missing contacts, inferred employment, stale profiles, and partial failures explicit. Does not validate emails or send messages.", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+	c := &cobra.Command{Use: "contacts", Short: "Find current company contacts and retrieve available business emails and direct dials", Long: "Discover current owners and relevant managers, append B2B emails and direct dials, and return one JSON report. Accepts a company array, a companies export, or raw Elasticsearch company hits. Keeps missing contacts, inferred employment, stale profiles, and partial failures explicit. Use --validate-emails for bulk deliverability evidence. Does not send messages.", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
 		if timeout <= 0 || timeout > 30*time.Minute {
 			return errors.New("timeout must be greater than zero and at most 30m")
 		}
@@ -78,12 +78,17 @@ func newContactsCommand(factory func(context.Context) (*mixrank.Client, error)) 
 		}
 		return workflowErr
 	}}
+	c.Flags().IntVar(&opts.Concurrency, "concurrency", 4, "Maximum simultaneous company/person requests (1..16)")
+	c.Flags().StringVar(&opts.ContactFilter, "contact-filter", "all", "Return all, any, email, phone, both, none, or valid-email contacts")
+	c.Flags().BoolVar(&opts.ValidateEmails, "validate-emails", false, "Validate returned work emails through a deduplicated bulk job")
+	validationFlags(c, &opts.ValidationOptions)
+	c.AddCommand(newContactValidationCommand(factory))
 	c.Flags().StringVar(&input, "companies", "", "Company JSON file, or - for stdin")
 	c.Flags().StringArrayVar(&ids, "company-id", nil, "MixRank company ID (repeatable for aliases of one company)")
 	c.Flags().StringVar(&domain, "domain", "", "Company website domain")
 	c.Flags().StringVar(&name, "name", "", "Company display name; requires an ID or domain")
 	c.Flags().StringSliceVar(&opts.Roles, "roles", nil, "Ordered role phrases; defaults to owners, executives and managers")
-	c.Flags().IntVar(&opts.MaxContacts, "max-contacts", 2, "Maximum contacts with email or phone per company (1..5)")
+	c.Flags().IntVar(&opts.MaxContacts, "max-contacts", 2, "Stop enrichment after this many contacts have requested channels (1..5); all also includes other discovered people")
 	c.Flags().IntVar(&opts.MaxCandidates, "max-candidates", 10, "Maximum candidates to consider per company (contacts..25)")
 	c.Flags().IntVar(&opts.MaxRequests, "max-requests", 100, "Maximum upstream workflow calls (1..250); partial results retained")
 	c.Flags().BoolVar(&opts.EmailsOnly, "emails-only", false, "Request B2B emails without direct dials")

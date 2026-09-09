@@ -1,44 +1,61 @@
-# From companies to actual contacts
+# Company contacts, filters, validation and concurrency
 
-`mixrank contacts` runs a shared SDK workflow: search current people at a company, rank relevant roles, request available business emails and direct dials, and return a single JSON report. The same workflow is the MCP tool `mixrank_company_contacts` and Go method `Client.CompanyContacts`.
+`mixrank contacts` finds current relevant people, appends available B2B emails and direct dials, and returns JSON. The CLI, `Client.CompanyContacts`, and MCP `mixrank_company_contacts` share the implementation.
 
 ```sh
-mixrank contacts --domain example.com --name 'Example Company'
-mixrank contacts --company-id 123 --domain example.com --max-contacts 2
-mixrank contacts --companies companies.json --output contacts.json
-mixrank contacts --companies - --roles 'owner,president,office manager' --emails-only
+mixrank contacts --domain example.com --concurrency 4
+mixrank contacts --companies companies.json --contact-filter email --output contacts.json
+mixrank contacts --companies companies.json --roles 'owner,president,office manager' \
+  --validate-emails --validation-wait 30s --concurrency 4 --output contacts.json
+mixrank contacts validate --input contacts.json --validation-wait 2m --output validated.json
 ```
 
-The company file may be a JSON array, an object containing `companies`, or an unmodified Elasticsearch company-search response. It understands `company_id`, arrays of `company_ids`, and semicolon-separated legacy IDs. IDs retain integer precision. A company needs an ID or domain; a name alone is ambiguous.
+Company input accepts an array, a `companies` export, or raw Elasticsearch company hits. Use `--companies -` for stdin. A company requires an ID or domain; names alone are ambiguous. Numeric IDs preserve precision, and duplicate aliases can be provided using `company_ids`.
 
-```json
-{
-  "companies": [
-    {"name": "Example Company", "company_ids": ["123"], "domain": "example.com"}
-  ]
-}
-```
+## One contacts array
 
-The report has a row for every supplied company, including those with no result. `contacts` contains people with at least one returned email or direct dial. `candidates_without_contacts` records examined people whose requested channels were absent or withheld. `issues`, `complete`, `requests_made`, and `search_limited` preserve errors and coverage limits. A partial report is written even if a later call is cancelled or rejected for permissions.
+Every consistent discovered person appears under their company's `contacts`. Each row includes `has_email`, `has_phone`, `enrichment_status`, `email_status`, `phone_status`, employment evidence, dates and review reasons. There is no separate array for people missing contact details.
 
-Each contact includes the person's name, role, profile URL, matched current employment, profile update date, `business_emails`, `direct_dials`, channel status, and review reasons. The workflow requests `b2b_emails` and `directdials` by default; `--emails-only` omits phones. Consumer and educational email add-ons are never requested. B2B emails for unrelated employer domains are omitted. Email-domain aliases are not guessed.
+`enrichment_status` is `complete`, `not_enriched`, or `error`. Complete enrichment can still return no channels. Not-enriched rows mean the contact target, request budget or cancellation stopped work; they do not mean contact information is unavailable. Privacy-redacted records are excluded.
 
-Names, emails and numbers are provider-reported. Email `validation` is `not_run`; direct dials are person-level numbers whose line type and company association have not been independently verified. Inferred employer associations, missing or old profile dates, conflicting "former" headlines, and uncertain input companies are flagged for review. Availability is not a deliverability or identity guarantee. No emails are guessed or sent. If validation is requested, use a separate bulk validation job.
+| `--contact-filter` | Returned people |
+|---|---|
+| `all` (default) | All discovered people, including missing or unrequested channels |
+| `any` | At least one business email or direct dial |
+| `email` | At least one business email |
+| `phone` | At least one direct dial |
+| `both` | Both channels |
+| `none` | Enrichment completed and neither channel was returned |
+| `valid-email` | At least one email whose provider validity is exactly `valid`; requires `--validate-emails` |
 
-The default roles are owner, founder, CEO, president, general manager, operations manager, office manager, and marketing director. The search constrains employer, current status, no end date, and role on the same nested experience item. It checks that returned evidence again before enrichment. Source-linked records with fewer review concerns come first, then the requested role order; this is not a buying-intent score.
+Company rows remain present when filters return no people. `contacts_filtered` counts omitted rows. If validation is pending, filtering is deferred (`contact_filter_applied: false`) to preserve the complete submitted email set for resumption. Resuming the job applies the requested filter after completion. Review flags remain separate from channel availability and deliverability.
 
-Each run accepts at most 25 companies. Defaults are two contacts per company, ten candidates per company, 100 upstream workflow calls, and a ten-minute CLI timeout. `--max-contacts`, `--max-candidates`, `--max-requests`, and `--timeout` set explicit bounds. Calls are sequential, use the existing semantic retry policy, and never silently switch to LiveScan fetch or resubmit uncertain enrichment. Search retries can make physical HTTP attempts exceed the logical workflow-call counter.
+`--max-contacts` is the enrichment stopping target, default two people with requested channels per company, maximum five. For `email`, `phone`, or `both`, that channel criterion controls the target. `valid-email` searches for emails, then filters by validation; it cannot promise that two will validate. `all` may return more than two rows because it also keeps discovered people without channels or not yet enriched. `--max-candidates` limits discovery to ten people by default, maximum 25. At most 25 companies are accepted per run.
 
-MCP accepts the same `companies` array and optional `roles`, `max_contacts_per_company`, `max_candidates_per_company`, `max_requests`, and `emails_only`. It uses the host's existing credential configuration. Both stdio and HTTP expose this tool; hosted authentication remains a separate deployment concern.
+## Email validation in the same call
 
-For agent calls, begin with one company at a time unless the client has a sufficiently long tool timeout. Larger CLI batches can take several minutes when upstream enrichment is slow. Client cancellation remains authoritative; do not assume a timed-out enrichment was never processed.
+`--validate-emails` collects and deduplicates available work emails, submits one provider bulk job, and attaches results to every matching email. It never creates concurrent one-address validations. The default validation strategy is `besteffort`; `--validation-strategy cached|besteffort|strict|fetch` and `--validation-maxage SECONDS` make that choice explicit. Validation does not switch company/person profiles to live fetch.
 
-```go
-report, err := client.CompanyContacts(ctx, mixrank.ContactOptions{
-    Companies: []mixrank.CompanyTarget{{Domain: "example.com"}},
-    MaxContacts: 2,
-})
-// Preserve report even when err is non-nil: earlier companies may have succeeded.
-```
+Each email retains `validation` (`not_run`, `pending`, the provider validity, or `not_returned`) and `validation_details` with the original provider evidence: timestamps, catchall/disposable/consumer indicators, greylist state, and retry timing. Ambiguous and maybe-valid outcomes are not treated as valid. Phone numbers remain unvalidated person-level direct dials, with no guarantee of business-line ownership.
 
-Keep contact exports outside public repositories. `--output` creates a private file and refuses to overwrite existing data before making requests.
+The report's `email_validation` includes job ID, status, address-set fingerprint, submitted/applied counts and issues. A 30-second wait is the CLI/MCP default; `--validation-wait 0s` submits or checks once and returns. Pending validation sets `complete: false` and retains all contact data. The provider job continues after the client stops waiting.
+
+Resume with `mixrank contacts validate --input REPORT`, Go `Client.ValidateContacts`, or MCP `mixrank_validate_contacts` with the original `report`. A retained job ID is checked/downloaded, never submitted again. Changing the email set while a job is pending is rejected. An uncertain submission without an ID requires recovering the ID through the provider's job list; it is not blindly retried. A completed report is a no-op; start a new explicitly reviewed report to request another validation.
+
+This workflow uses ordinary bulk jobs. Private bulk jobs and provider-output deletion remain available through the named/raw API commands. [Provider email validation documentation](https://mixrank.com/api/documentation#/email/validate/bulk-job).
+
+## Parallel processing and bounds
+
+`--concurrency` defaults to four simultaneous requests, configurable from 1 to 16. Company searches and person enrichment share one global limiter per workflow. People within one company are enriched in ranked batches; company and contact order remain stable even when calls finish out of order. There is no cross-host limit for ordinary lookups; callers coordinate multiple separate runs against their license.
+
+`--max-requests` caps logical submit/search/enrichment/status/download calls for the whole workflow (default 100, maximum 250). Safe search retries may make physical HTTP attempts exceed the logical count, but remain inside the concurrency slot. Enrichment and job submission are not automatically replayed. Permission/rate-limit failures stop queued work, retain completed results, and preserve uncertain outcomes for requests already in flight. Client cancellation remains authoritative.
+
+All single-address validation entry points retain their existing per-credential, cross-process serialization. Bulk validation uses MixRank's own distributed job processing and polling, independent of the lookup concurrency flag.
+
+## Evidence and exports
+
+Employer, current status, no end date, and role must match the same nested experience record; the response evidence is checked again before enrichment. B2B emails for unrelated employer domains are omitted; aliases and emails are never guessed. `--emails-only` omits direct dials. Default roles cover owners, founders, executives and relevant managers. Missing/stale/inferred employment and uncertain company qualification are flagged for review.
+
+`issues`, `complete`, `requests_made`, `search_limited`, and per-row statuses retain coverage limits and failures. `complete` describes bounded workflow completion, not an exhaustive directory or proof that contact information is current. `--output` creates a private file and refuses to overwrite existing data before making requests. Keep contact exports outside public repositories. No messages are sent.
+
+Both MCP transports expose `concurrency`, `contact_filter`, `validate_emails`, `validation_strategy`, `validation_maxage`, and `validation_wait_seconds`. For short agent timeouts, use small company batches and resume pending validation separately. Hosted authentication remains a deployment concern.

@@ -52,10 +52,10 @@ func TestCompanyContactsFindsUsableBusinessChannels(t *testing.T) {
 		t.Fatal(e)
 	}
 	co := r.Companies[0]
-	if co.Status != "contacts_found" || len(co.Contacts) != 1 || len(co.CandidatesWithoutContacts) != 1 || r.RequestsMade != 3 {
+	if co.Status != "contacts_found" || len(co.Contacts) != 2 || co.Contacts[0].HasEmail || co.Contacts[0].HasPhone || co.Contacts[0].EnrichmentStatus != "complete" || r.RequestsMade != 3 {
 		t.Fatalf("unexpected workflow result: %+v", co)
 	}
-	b := co.Contacts[0]
+	b := co.Contacts[1]
 	if b.PersonID != "2" || b.NeedsReview || len(b.BusinessEmails) != 1 || b.BusinessEmails[0].Email != "avery@example.test" || b.BusinessEmails[0].Validation != "not_run" || len(b.DirectDials) != 1 {
 		t.Fatalf("wrong contact result: %+v", b)
 	}
@@ -89,7 +89,7 @@ func TestCompanyContactsReviewAndBudget(t *testing.T) {
 	}
 	opts.MaxRequests = 1
 	r, e = c.CompanyContacts(context.Background(), opts)
-	if e != nil || r.Complete || r.RequestsMade != 1 || len(r.Companies[0].Contacts) != 0 {
+	if e != nil || r.Complete || r.RequestsMade != 1 || len(r.Companies[0].Contacts) != 1 || r.Companies[0].Contacts[0].EnrichmentStatus != "not_enriched" {
 		t.Fatal("budget not enforced", e)
 	}
 }
@@ -100,7 +100,7 @@ func TestCompanyContactsPermissionPartialAndInvalidInput(t *testing.T) {
 	if _, e := c.CompanyContacts(context.Background(), ContactOptions{Companies: []CompanyTarget{{Name: "Ambiguous"}}}); e == nil || calls != 0 {
 		t.Fatal("name-only request went upstream")
 	}
-	r, e := c.CompanyContacts(context.Background(), ContactOptions{Companies: []CompanyTarget{{Domain: "one.test"}, {Domain: "two.test"}}})
+	r, e := c.CompanyContacts(context.Background(), ContactOptions{Companies: []CompanyTarget{{Domain: "one.test"}, {Domain: "two.test"}}, Concurrency: 1})
 	if e == nil || r.Complete || calls != 1 || r.Companies[1].Status != "not_processed" {
 		t.Fatal("permission failure not preserved")
 	}

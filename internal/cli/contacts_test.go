@@ -45,3 +45,42 @@ func TestContactsCLIJSONAndNoOverwrite(t *testing.T) {
 		t.Fatal("existing file did not prevent calls")
 	}
 }
+
+func TestContactsCLIValidationFlagsAndResume(t *testing.T) {
+	submits, checks := 0, 0
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			submits++
+			if r.URL.Query().Get("strategy") != "cached" {
+				t.Error("validation strategy flag ignored")
+			}
+			fmt.Fprint(w, `{"id":"job","completed_at":null}`)
+			return
+		}
+		checks++
+		fmt.Fprint(w, `{"id":"job","completed_at":null}`)
+	}))
+	defer s.Close()
+	cl, _ := mixrank.New("synthetic", mixrank.Options{BaseURL: s.URL})
+	factory := func(context.Context) (*mixrank.Client, error) { return cl, nil }
+	input := filepath.Join(t.TempDir(), "input.json")
+	os.WriteFile(input, []byte(`{"complete":true,"companies":[{"contacts":[{"business_emails":[{"email":"avery@example.test"}]}]}]}`), 0600)
+	cmd := newContactsCommand(factory)
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetArgs([]string{"validate", "--input", input, "--validation-wait", "0s", "--validation-strategy", "cached"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var report mixrank.ContactReport
+	if json.Unmarshal(out.Bytes(), &report) != nil || report.Validation == nil || report.Validation.JobID != "job" || submits != 1 {
+		t.Fatal("CLI validation did not submit a bulk job")
+	}
+	os.WriteFile(input, out.Bytes(), 0600)
+	cmd = newContactsCommand(factory)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{"validate", "--input", input, "--validation-wait", "0s"})
+	if err := cmd.Execute(); err != nil || submits != 1 || checks != 1 {
+		t.Fatal("CLI resume resubmitted", err)
+	}
+}

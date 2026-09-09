@@ -36,3 +36,11 @@ Contact enrichment is distinct from email validation. The contact workflow does 
 ## Catalog maintenance
 
 Review newly signed-in documentation and provider revisions privately. Update factual names, types, parameters, operational notes and source dates in `catalog/endpoints.json` and mappings. Keep raw documentation snapshots outside the repository. Run `scripts/generate.py`, `scripts/package.py`, tests and their `--check` modes. A new undisclosed or account-inaccessible endpoint should be recorded as a limitation, not assigned a fabricated contract.
+
+## Unified contacts and validation, v0.3.0
+
+The output has one contacts array with explicit availability/enrichment fields, and optional filters. Tests use controlled overlapping HTTP handlers to prove person enrichment runs concurrently, output remains ranked, and a shared limit/request budget holds across multiple companies. Filters preserve company rows and distinguish not-enriched people from completed empty results.
+
+Bulk validation tests assert deduplicated uploads, retained job IDs, no second submission on resume, provider evidence attachment, deferred filtering while pending, cancellation, uncertain submission protection, changed-address rejection, partial results, and bounded JSON/JSONL/CSV/gzip parsing. CLI and MCP integration tests cover the new flags/arguments and the resume tool. Current tool count is 105. Single-address serialization tests remain in the shared client suite.
+
+Bounded live verification on September 9, 2026 ran the CLI against two supplied Illinois roofing companies with concurrency two. A separate bulk job validated two previously returned work emails; resume downloaded the provider's gzip JSONL and attached one `valid` and one `invalid` result with timestamps and other evidence. Live company/contact outputs remain in private user storage and are not fixtures or release assets.

@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -24,18 +26,23 @@ type CompanyTarget struct {
 }
 
 type ContactOptions struct {
-	Companies     []CompanyTarget `json:"companies"`
-	Roles         []string        `json:"roles,omitempty"`
-	MaxContacts   int             `json:"max_contacts_per_company,omitempty"`
-	MaxCandidates int             `json:"max_candidates_per_company,omitempty"`
-	MaxRequests   int             `json:"max_requests,omitempty"`
-	EmailsOnly    bool            `json:"emails_only,omitempty"`
+	Companies         []CompanyTarget          `json:"companies"`
+	Roles             []string                 `json:"roles,omitempty"`
+	MaxContacts       int                      `json:"max_contacts_per_company,omitempty"`
+	MaxCandidates     int                      `json:"max_candidates_per_company,omitempty"`
+	MaxRequests       int                      `json:"max_requests,omitempty"`
+	EmailsOnly        bool                     `json:"emails_only,omitempty"`
+	Concurrency       int                      `json:"concurrency,omitempty"`
+	ContactFilter     string                   `json:"contact_filter,omitempty"`
+	ValidateEmails    bool                     `json:"validate_emails,omitempty"`
+	ValidationOptions ContactValidationOptions `json:"validation_options,omitempty"`
 }
 
 type BusinessEmail struct {
-	Email      string `json:"email"`
-	Domain     string `json:"domain"`
-	Validation string `json:"validation"`
+	Email             string         `json:"email"`
+	Domain            string         `json:"domain"`
+	Validation        string         `json:"validation"`
+	ValidationDetails map[string]any `json:"validation_details,omitempty"`
 }
 
 type ContactEmployment struct {
@@ -48,6 +55,9 @@ type ContactEmployment struct {
 }
 
 type BusinessContact struct {
+	HasEmail         bool              `json:"has_email"`
+	HasPhone         bool              `json:"has_phone"`
+	EnrichmentStatus string            `json:"enrichment_status"`
 	PersonID         string            `json:"person_id"`
 	Name             string            `json:"name"`
 	Title            string            `json:"title"`
@@ -69,31 +79,35 @@ type ContactIssue struct {
 }
 
 type CompanyContactResult struct {
-	Company                   CompanyTarget     `json:"company"`
-	Status                    string            `json:"status"`
-	PeopleMatched             int               `json:"people_matched"`
-	CandidatesExamined        int               `json:"candidates_examined"`
-	SearchLimited             bool              `json:"search_limited"`
-	Contacts                  []BusinessContact `json:"contacts"`
-	CandidatesWithoutContacts []BusinessContact `json:"candidates_without_contacts"`
-	Issues                    []ContactIssue    `json:"issues"`
+	Company            CompanyTarget     `json:"company"`
+	Status             string            `json:"status"`
+	PeopleMatched      int               `json:"people_matched"`
+	CandidatesExamined int               `json:"candidates_examined"`
+	SearchLimited      bool              `json:"search_limited"`
+	Contacts           []BusinessContact `json:"contacts"`
+	ContactsFiltered   int               `json:"contacts_filtered"`
+	Issues             []ContactIssue    `json:"issues"`
 }
 
 type ContactReport struct {
-	RetrievedAt  string                 `json:"retrieved_at_utc"`
-	Companies    []CompanyContactResult `json:"companies"`
-	RequestsMade int                    `json:"requests_made"`
-	Complete     bool                   `json:"complete"`
-	Roles        []string               `json:"roles"`
-	Notes        []string               `json:"notes"`
+	ContactFilterApplied bool                     `json:"contact_filter_applied"`
+	Validation           *ContactValidationReport `json:"email_validation,omitempty"`
+	Concurrency          int                      `json:"concurrency"`
+	ContactFilter        string                   `json:"contact_filter"`
+	RetrievedAt          string                   `json:"retrieved_at_utc"`
+	Companies            []CompanyContactResult   `json:"companies"`
+	RequestsMade         int                      `json:"requests_made"`
+	Complete             bool                     `json:"complete"`
+	Roles                []string                 `json:"roles"`
+	Notes                []string                 `json:"notes"`
 }
 
 var defaultContactRoles = []string{"owner", "founder", "CEO", "president", "general manager", "operations manager", "office manager", "marketing director"}
 
 // CompanyContacts discovers current relevant people and appends available B2B
-// email addresses and direct dials. It never guesses emails, validates them,
-// changes to a live-fetch strategy, sends messages, or requests consumer emails.
-// Partial results are returned together with cancellation or permission errors.
+// emails and direct dials with bounded parallel requests. All discovered people
+// share one contacts array; availability and enrichment status stay explicit.
+// Validation is opt-in and uses a deduplicated bulk job, never parallel one-offs.
 func (c *Client) CompanyContacts(ctx context.Context, opts ContactOptions) (*ContactReport, error) {
 	opts.Companies = append([]CompanyTarget(nil), opts.Companies...)
 	for i := range opts.Companies {
@@ -103,212 +117,374 @@ func (c *Client) CompanyContacts(ctx context.Context, opts ContactOptions) (*Con
 	if err := normalizeContactOptions(&opts); err != nil {
 		return nil, err
 	}
-	r := &ContactReport{RetrievedAt: time.Now().UTC().Format(time.RFC3339), Complete: true, Roles: opts.Roles,
-		Notes: []string{"Contacts are provider-reported, not independently verified. B2B emails are restricted to the matched employer domain; unrelated work emails are omitted.", "Email validation was not run. Direct dials are person-level numbers; their line type and association with a specific company are not verified.", "Current employment is the provider's cached observation. Missing, old, inferred or conflicting evidence is marked for review.", "Candidate and request limits bound coverage. A missing result is not evidence that a business has no contact information."}}
+	r := &ContactReport{RetrievedAt: time.Now().UTC().Format(time.RFC3339), Complete: true, Roles: opts.Roles, Concurrency: opts.Concurrency, ContactFilter: opts.ContactFilter,
+		Notes: []string{"Contacts are provider-reported, not independently verified. B2B emails are restricted to the matched employer domain; unrelated work emails are omitted.", "Email validation is separate from contact availability. Direct dials are person-level numbers; line type and company association are not verified.", "Current employment is a cached observation. Missing, old, inferred or conflicting evidence is marked for review.", "All discovered people use contacts, including unavailable and not-enriched rows. Filters affect returned rows, not company-level coverage or errors."}}
 	for _, co := range opts.Companies {
-		r.Companies = append(r.Companies, CompanyContactResult{Company: co, Status: "not_processed", Contacts: []BusinessContact{}, CandidatesWithoutContacts: []BusinessContact{}, Issues: []ContactIssue{}})
+		r.Companies = append(r.Companies, CompanyContactResult{Company: co, Status: "not_processed", Contacts: []BusinessContact{}, Issues: []ContactIssue{}})
+	}
+	runCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	work := &contactWork{client: c, slots: make(chan struct{}, opts.Concurrency), max: int64(opts.MaxRequests), cancel: cancel}
+	var wg sync.WaitGroup
+	var next atomic.Int64
+	for n := 0; n < min(opts.Concurrency, len(r.Companies)); n++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				i := int(next.Add(1)) - 1
+				if i >= len(r.Companies) {
+					return
+				}
+				c.contactCompany(runCtx, &r.Companies[i], opts, work)
+			}
+		}()
+	}
+	wg.Wait()
+	r.RequestsMade = int(work.calls.Load())
+	for i := range r.Companies {
+		cr := &r.Companies[i]
+		if len(cr.Issues) > 0 || cr.Status == "not_processed" || cr.Status == "request_budget_exhausted" {
+			r.Complete = false
+		}
+	}
+	err := context.Cause(runCtx)
+	if opts.ValidateEmails && err == nil {
+		vo := opts.ValidationOptions
+		remaining := opts.MaxRequests - r.RequestsMade
+		if remaining < 1 {
+			r.Complete = false
+			r.Validation = &ContactValidationReport{Status: "not_started", Issues: []string{"request budget exhausted before email validation"}}
+		} else {
+			if vo.MaxRequests == 0 || vo.MaxRequests > remaining {
+				vo.MaxRequests = remaining
+			}
+			err = c.ValidateContacts(ctx, r, vo)
+		}
+	}
+	filterContactReport(r, opts.ContactFilter)
+	return r, err
+}
+
+var errContactBudget = errors.New("request budget exhausted")
+
+type contactWork struct {
+	client *Client
+	slots  chan struct{}
+	calls  atomic.Int64
+	max    int64
+	cancel context.CancelCauseFunc
+}
+
+func (w *contactWork) request(ctx context.Context, op string, in Request) (map[string]any, error) {
+	select {
+	case w.slots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, context.Cause(ctx)
+	}
+	defer func() { <-w.slots }()
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	for {
+		used := w.calls.Load()
+		if used >= w.max {
+			return nil, errContactBudget
+		}
+		if w.calls.CompareAndSwap(used, used+1) {
+			break
+		}
+	}
+	v, err := w.client.contactJSON(ctx, op, in)
+	if stopContactWorkflow(err) {
+		w.cancel(err)
+	}
+	return v, err
+}
+func (c *Client) contactCompany(ctx context.Context, cr *CompanyContactResult, opts ContactOptions, work *contactWork) {
+	if ctx.Err() != nil {
+		return
+	}
+	body, _ := json.Marshal(contactSearch(cr.Company, opts))
+	v, err := work.request(ctx, "search_person2", Request{Body: body})
+	if err != nil {
+		cr.Status = "search_error"
+		if errors.Is(err, errContactBudget) {
+			cr.Status = "request_budget_exhausted"
+		}
+		cr.Issues = append(cr.Issues, ContactIssue{Reason: c.Redact(err.Error())})
+		return
+	}
+	hits := object(v["hits"])
+	if hits == nil {
+		cr.Status = "search_error"
+		cr.Issues = append(cr.Issues, ContactIssue{Reason: "provider response has no hits object"})
+		return
+	}
+	cr.PeopleMatched = integer(object(hits["total"])["value"])
+	if _, ok := hits["total"].(json.Number); ok {
+		cr.PeopleMatched = integer(hits["total"])
+	}
+	cr.SearchLimited = cr.PeopleMatched > len(array(hits["hits"])) || str(object(hits["total"])["relation"]) == "gte"
+	if timed, _ := v["timed_out"].(bool); timed || integer(object(v["_shards"])["failed"]) > 0 {
+		cr.SearchLimited = true
+		cr.Issues = append(cr.Issues, ContactIssue{Reason: "search timed out or some shards failed"})
+	}
+	cr.Contacts = contactCandidates(cr, opts, v)
+	for i := range cr.Contacts {
+		cr.Contacts[i].EnrichmentStatus = "not_enriched"
+		cr.Contacts[i].EmailStatus = "not_requested"
+		cr.Contacts[i].PhoneStatus = "not_requested"
+	}
+	available := 0
+	for start := 0; start < len(cr.Contacts) && available < opts.MaxContacts && ctx.Err() == nil; {
+		width := min(opts.Concurrency, opts.MaxContacts-available, len(cr.Contacts)-start)
+		errs := make([]error, width)
+		var wg sync.WaitGroup
+		for j := 0; j < width; j++ {
+			wg.Add(1)
+			go func(j int) {
+				defer wg.Done()
+				errs[j] = c.enrichContact(ctx, cr.Company, &cr.Contacts[start+j], opts, work)
+			}(j)
+		}
+		wg.Wait()
+		budget := false
+		for j, e := range errs {
+			b := &cr.Contacts[start+j]
+			if b.EnrichmentStatus != "not_enriched" {
+				cr.CandidatesExamined++
+			}
+			if e != nil {
+				cr.Issues = append(cr.Issues, ContactIssue{b.PersonID, c.Redact(e.Error())})
+				budget = budget || errors.Is(e, errContactBudget)
+			}
+			if contactMatches(*b, enrichmentFilter(opts.ContactFilter)) {
+				available++
+			}
+		}
+		start += width
+		if budget {
+			break
+		}
+	}
+	kept := []BusinessContact{}
+	for _, b := range cr.Contacts {
+		if b.EnrichmentStatus == "redacted" {
+			cr.Issues = append(cr.Issues, ContactIssue{b.PersonID, "privacy-redacted overview excluded"})
+		} else {
+			kept = append(kept, b)
+		}
+	}
+	cr.Contacts = kept
+	cr.Status = "no_matching_people"
+	if len(cr.Contacts) > 0 {
+		cr.Status = "no_contact_data"
+	}
+	for _, b := range cr.Contacts {
+		if b.HasEmail || b.HasPhone {
+			if cr.Status != "contacts_found" {
+				cr.Status = "review_required"
+			}
+			if !b.NeedsReview {
+				cr.Status = "contacts_found"
+			}
+		}
+	}
+	if len(cr.Issues) > 0 && cr.Status != "contacts_found" && cr.Status != "review_required" {
+		cr.Status = "incomplete"
+	}
+}
+func contactCandidates(cr *CompanyContactResult, opts ContactOptions, v map[string]any) []BusinessContact {
+	candidates := []BusinessContact{}
+	seen := map[string]bool{}
+	entries := array(object(v["hits"])["hits"])
+	if len(entries) > opts.MaxCandidates {
+		entries = entries[:opts.MaxCandidates]
+		cr.SearchLimited = true
+	}
+	for _, entry := range entries {
+		h := object(entry)
+		src := object(h["_source"])
+		pid := str(src["person_id"])
+		if pid == "" {
+			pid = str(h["_id"])
+		}
+		if seen[pid] || pid == "" {
+			continue
+		}
+		seen[pid] = true
+		if redacted, _ := src["privacy_redact"].(bool); redacted {
+			cr.Issues = append(cr.Issues, ContactIssue{pid, "privacy-redacted record excluded"})
+			continue
+		}
+		matches := array(object(object(object(h["inner_hits"])["experience"])["hits"])["hits"])
+		var chosen map[string]any
+		for _, m := range matches {
+			e := object(object(m)["_source"])
+			current, _ := e["is_current"].(bool)
+			if !current || str(e["end_date"]) != "" || !matchesContactCompany(cr.Company, e) || !matchesRole(str(e["title"]), opts.Roles) {
+				continue
+			}
+			if chosen == nil || roleRank(str(e["title"]), opts.Roles) < roleRank(str(chosen["title"]), opts.Roles) {
+				chosen = e
+			}
+		}
+		if chosen == nil {
+			cr.Issues = append(cr.Issues, ContactIssue{pid, "no consistent current employer and role evidence in the same experience record"})
+			continue
+		}
+		b := BusinessContact{PersonID: pid, Name: str(object(src["name"])["full"]), Title: str(chosen["title"]), LinkedInURL: str(src["public_profile_url"]), ProfileUpdatedAt: str(src["updated_at"]), BusinessEmails: []BusinessEmail{}, DirectDials: []string{}, ReviewReasons: []string{}, Source: "MixRank person2 search + person overview (b2b_emails,directdials)", Employment: ContactEmployment{CompanyID: str(chosen["company_id"]), CompanyName: str(chosen["company_name"]), Domain: cleanDomain(str(chosen["domain"])), Title: str(chosen["title"]), IsCurrent: true}}
+		if linked, ok := chosen["has_source_company_id"].(bool); ok {
+			b.Employment.SourceLinked = &linked
+		}
+		if b.Employment.SourceLinked == nil || !*b.Employment.SourceLinked {
+			b.ReviewReasons = append(b.ReviewReasons, "employer association is inferred or source linkage is unknown")
+		}
+		head := strings.ToLower(str(src["headline"]))
+		coName := strings.ToLower(b.Employment.CompanyName)
+		if (strings.Contains(head, "former") || strings.Contains(head, "retired")) && coName != "" && strings.Contains(head, coName) {
+			b.ReviewReasons = append(b.ReviewReasons, "headline conflicts with current-employment flag")
+		}
+		if b.Name == "" || strings.EqualFold(b.Name, b.Employment.CompanyName) {
+			b.ReviewReasons = append(b.ReviewReasons, "record does not establish a named individual")
+		}
+		if staleContactDate(b.ProfileUpdatedAt) {
+			b.ReviewReasons = append(b.ReviewReasons, "profile update date is missing, unrecognized, or older than one year")
+		}
+		if cr.Company.Qualification == "needs_review" {
+			b.ReviewReasons = append(b.ReviewReasons, "input company qualification needs review")
+		}
+		b.NeedsReview = len(b.ReviewReasons) > 0
+		candidates = append(candidates, b)
+	}
+	sort.SliceStable(candidates, func(a, b int) bool {
+		if candidates[a].NeedsReview != candidates[b].NeedsReview {
+			return !candidates[a].NeedsReview
+		}
+		return roleRank(candidates[a].Title, opts.Roles) < roleRank(candidates[b].Title, opts.Roles)
+	})
+
+	return candidates
+
+}
+func (c *Client) enrichContact(ctx context.Context, company CompanyTarget, candidate *BusinessContact, opts ContactOptions, work *contactWork) error {
+	enable := "b2b_emails"
+	if !opts.EmailsOnly {
+		enable += ",directdials"
+	}
+	profile, err := work.request(ctx, "get_person_by_id", Request{Parameters: map[string]string{"id": candidate.PersonID, "enable": enable}})
+	if err != nil {
+		if !errors.Is(err, errContactBudget) && ctx.Err() == nil {
+			candidate.EnrichmentStatus = "error"
+			candidate.EmailStatus = "error"
+			candidate.PhoneStatus = "error"
+		}
+		return err
+	}
+	if id := str(profile["id"]); id != "" && id != candidate.PersonID {
+		candidate.EnrichmentStatus = "error"
+		return errors.New("person overview ID conflicts with search ID")
+	}
+	if redacted, _ := profile["privacy_redact"].(bool); redacted {
+		candidate.EnrichmentStatus = "redacted"
+		candidate.EmailStatus = "redacted"
+		candidate.PhoneStatus = "redacted"
+		return nil
+	}
+	domain := company.Domain
+	if domain == "" {
+		domain = candidate.Employment.Domain
+	}
+	candidate.EmailStatus = contactFieldStatus(profile, "b2b_emails")
+	seenEmail := map[string]bool{}
+	for _, v := range array(profile["b2b_emails"]) {
+		email := strings.TrimSpace(str(object(v)["email"]))
+		parsed, e := mail.ParseAddress(email)
+		if e != nil || parsed.Address != email {
+			continue
+		}
+		_, emailDomain, ok := strings.Cut(email, "@")
+		emailDomain = cleanDomain(emailDomain)
+		if !ok || domain == "" || emailDomain != domain || seenEmail[strings.ToLower(email)] {
+			continue
+		}
+		seenEmail[strings.ToLower(email)] = true
+		candidate.BusinessEmails = append(candidate.BusinessEmails, BusinessEmail{Email: email, Domain: emailDomain, Validation: "not_run"})
+	}
+	if candidate.EmailStatus == "available" && len(candidate.BusinessEmails) == 0 {
+		candidate.EmailStatus = "no_email_for_company_domain"
+	}
+	candidate.PhoneStatus = "not_requested"
+	if !opts.EmailsOnly {
+		candidate.PhoneStatus = contactFieldStatus(profile, "directdials")
+		seenPhone := map[string]bool{}
+		for _, v := range array(profile["directdials"]) {
+			phone := strings.TrimSpace(str(v))
+			if phone != "" && !seenPhone[phone] {
+				candidate.DirectDials = append(candidate.DirectDials, phone)
+				seenPhone[phone] = true
+			}
+		}
+	}
+
+	candidate.HasEmail = len(candidate.BusinessEmails) > 0
+	candidate.HasPhone = len(candidate.DirectDials) > 0
+	candidate.EnrichmentStatus = "complete"
+	return nil
+}
+func enrichmentFilter(filter string) string {
+	switch filter {
+	case "email", "valid-email":
+		return "email"
+	case "phone", "both":
+		return filter
+	default:
+		return "any"
+	}
+}
+func contactMatches(b BusinessContact, filter string) bool {
+	switch filter {
+	case "all":
+		return true
+	case "any":
+		return b.HasEmail || b.HasPhone
+	case "email":
+		return b.HasEmail
+	case "phone":
+		return b.HasPhone
+	case "both":
+		return b.HasEmail && b.HasPhone
+	case "none":
+		return b.EnrichmentStatus == "complete" && !b.HasEmail && !b.HasPhone
+	case "valid-email":
+		for _, e := range b.BusinessEmails {
+			if e.Validation == "valid" {
+				return true
+			}
+		}
+	}
+	return false
+}
+func filterContactReport(r *ContactReport, filter string) {
+	r.ContactFilter = filter
+	r.ContactFilterApplied = true
+	if r.Validation != nil && r.Validation.Status != "completed" && r.Validation.Status != "not_needed" && filter != "all" {
+		r.ContactFilterApplied = false
+		return
 	}
 	for i := range r.Companies {
 		cr := &r.Companies[i]
-		if err := ctx.Err(); err != nil {
-			r.Complete = false
-			return r, err
-		}
-		if r.RequestsMade >= opts.MaxRequests {
-			cr.Status = "request_budget_exhausted"
-			r.Complete = false
-			continue
-		}
-		body, _ := json.Marshal(contactSearch(cr.Company, opts))
-		r.RequestsMade++
-		v, err := c.contactJSON(ctx, "search_person2", Request{Body: body})
-		if err != nil {
-			cr.Status = "search_error"
-			cr.Issues = append(cr.Issues, ContactIssue{Reason: c.Redact(err.Error())})
-			r.Complete = false
-			if stopContactWorkflow(err) {
-				return r, err
-			}
-			continue
-		}
-		hits := object(v["hits"])
-		if hits == nil {
-			cr.Status = "search_error"
-			cr.Issues = append(cr.Issues, ContactIssue{Reason: "provider response has no hits object"})
-			r.Complete = false
-			continue
-		}
-		cr.PeopleMatched = integer(object(hits["total"])["value"])
-		if _, ok := hits["total"].(json.Number); ok {
-			cr.PeopleMatched = integer(hits["total"])
-		}
-		entries := array(hits["hits"])
-		cr.SearchLimited = cr.PeopleMatched > len(entries) || str(object(hits["total"])["relation"]) == "gte"
-		if timed, _ := v["timed_out"].(bool); timed || integer(object(v["_shards"])["failed"]) > 0 {
-			cr.SearchLimited = true
-			cr.Issues = append(cr.Issues, ContactIssue{Reason: "search timed out or some shards failed"})
-			r.Complete = false
-		}
-		candidates := []BusinessContact{}
-		seen := map[string]bool{}
-		for _, entry := range entries {
-			h := object(entry)
-			src := object(h["_source"])
-			pid := str(src["person_id"])
-			if pid == "" {
-				pid = str(h["_id"])
-			}
-			if seen[pid] || pid == "" {
-				continue
-			}
-			seen[pid] = true
-			if redacted, _ := src["privacy_redact"].(bool); redacted {
-				cr.Issues = append(cr.Issues, ContactIssue{pid, "privacy-redacted record excluded"})
-				continue
-			}
-			matches := array(object(object(object(h["inner_hits"])["experience"])["hits"])["hits"])
-			var chosen map[string]any
-			for _, m := range matches {
-				e := object(object(m)["_source"])
-				current, _ := e["is_current"].(bool)
-				if !current || str(e["end_date"]) != "" || !matchesContactCompany(cr.Company, e) || !matchesRole(str(e["title"]), opts.Roles) {
-					continue
-				}
-				if chosen == nil || roleRank(str(e["title"]), opts.Roles) < roleRank(str(chosen["title"]), opts.Roles) {
-					chosen = e
-				}
-			}
-			if chosen == nil {
-				cr.Issues = append(cr.Issues, ContactIssue{pid, "no consistent current employer and role evidence in the same experience record"})
-				continue
-			}
-			b := BusinessContact{PersonID: pid, Name: str(object(src["name"])["full"]), Title: str(chosen["title"]), LinkedInURL: str(src["public_profile_url"]), ProfileUpdatedAt: str(src["updated_at"]), BusinessEmails: []BusinessEmail{}, DirectDials: []string{}, ReviewReasons: []string{}, Source: "MixRank person2 search + person overview (b2b_emails,directdials)", Employment: ContactEmployment{CompanyID: str(chosen["company_id"]), CompanyName: str(chosen["company_name"]), Domain: cleanDomain(str(chosen["domain"])), Title: str(chosen["title"]), IsCurrent: true}}
-			if linked, ok := chosen["has_source_company_id"].(bool); ok {
-				b.Employment.SourceLinked = &linked
-			}
-			if b.Employment.SourceLinked == nil || !*b.Employment.SourceLinked {
-				b.ReviewReasons = append(b.ReviewReasons, "employer association is inferred or source linkage is unknown")
-			}
-			head := strings.ToLower(str(src["headline"]))
-			coName := strings.ToLower(b.Employment.CompanyName)
-			if (strings.Contains(head, "former") || strings.Contains(head, "retired")) && coName != "" && strings.Contains(head, coName) {
-				b.ReviewReasons = append(b.ReviewReasons, "headline conflicts with current-employment flag")
-			}
-			if b.Name == "" || strings.EqualFold(b.Name, b.Employment.CompanyName) {
-				b.ReviewReasons = append(b.ReviewReasons, "record does not establish a named individual")
-			}
-			if staleContactDate(b.ProfileUpdatedAt) {
-				b.ReviewReasons = append(b.ReviewReasons, "profile update date is missing, unrecognized, or older than one year")
-			}
-			if cr.Company.Qualification == "needs_review" {
-				b.ReviewReasons = append(b.ReviewReasons, "input company qualification needs review")
-			}
-			b.NeedsReview = len(b.ReviewReasons) > 0
-			candidates = append(candidates, b)
-		}
-		sort.SliceStable(candidates, func(a, b int) bool {
-			if candidates[a].NeedsReview != candidates[b].NeedsReview {
-				return !candidates[a].NeedsReview
-			}
-			return roleRank(candidates[a].Title, opts.Roles) < roleRank(candidates[b].Title, opts.Roles)
-		})
-		for _, candidate := range candidates {
-			if len(cr.Contacts) >= opts.MaxContacts {
-				break
-			}
-			if err = ctx.Err(); err != nil {
-				r.Complete = false
-				return r, err
-			}
-			if r.RequestsMade >= opts.MaxRequests {
-				cr.Issues = append(cr.Issues, ContactIssue{Reason: "request budget exhausted"})
-				r.Complete = false
-				break
-			}
-			cr.CandidatesExamined++
-			r.RequestsMade++
-			enable := "b2b_emails"
-			if !opts.EmailsOnly {
-				enable += ",directdials"
-			}
-			profile, e := c.contactJSON(ctx, "get_person_by_id", Request{Parameters: map[string]string{"id": candidate.PersonID, "enable": enable}})
-			if e != nil {
-				cr.Issues = append(cr.Issues, ContactIssue{candidate.PersonID, c.Redact(e.Error())})
-				r.Complete = false
-				if stopContactWorkflow(e) {
-					cr.Status = "enrichment_error"
-					return r, e
-				}
-				continue
-			}
-			if id := str(profile["id"]); id != "" && id != candidate.PersonID {
-				cr.Issues = append(cr.Issues, ContactIssue{candidate.PersonID, "person overview ID conflicts with search ID"})
-				r.Complete = false
-				continue
-			}
-			if redacted, _ := profile["privacy_redact"].(bool); redacted {
-				cr.Issues = append(cr.Issues, ContactIssue{candidate.PersonID, "overview is privacy redacted"})
-				continue
-			}
-			domain := cr.Company.Domain
-			if domain == "" {
-				domain = candidate.Employment.Domain
-			}
-			candidate.EmailStatus = contactFieldStatus(profile, "b2b_emails")
-			seenEmail := map[string]bool{}
-			for _, v := range array(profile["b2b_emails"]) {
-				email := strings.TrimSpace(str(object(v)["email"]))
-				parsed, e := mail.ParseAddress(email)
-				if e != nil || parsed.Address != email {
-					continue
-				}
-				_, emailDomain, ok := strings.Cut(email, "@")
-				emailDomain = cleanDomain(emailDomain)
-				if !ok || domain == "" || emailDomain != domain || seenEmail[strings.ToLower(email)] {
-					continue
-				}
-				seenEmail[strings.ToLower(email)] = true
-				candidate.BusinessEmails = append(candidate.BusinessEmails, BusinessEmail{email, emailDomain, "not_run"})
-			}
-			if candidate.EmailStatus == "available" && len(candidate.BusinessEmails) == 0 {
-				candidate.EmailStatus = "no_email_for_company_domain"
-			}
-			candidate.PhoneStatus = "not_requested"
-			if !opts.EmailsOnly {
-				candidate.PhoneStatus = contactFieldStatus(profile, "directdials")
-				seenPhone := map[string]bool{}
-				for _, v := range array(profile["directdials"]) {
-					phone := strings.TrimSpace(str(v))
-					if phone != "" && !seenPhone[phone] {
-						candidate.DirectDials = append(candidate.DirectDials, phone)
-						seenPhone[phone] = true
-					}
-				}
-			}
-			if len(candidate.BusinessEmails) > 0 || len(candidate.DirectDials) > 0 {
-				cr.Contacts = append(cr.Contacts, candidate)
+		kept := []BusinessContact{}
+		for _, b := range cr.Contacts {
+			if contactMatches(b, filter) {
+				kept = append(kept, b)
 			} else {
-				cr.CandidatesWithoutContacts = append(cr.CandidatesWithoutContacts, candidate)
+				cr.ContactsFiltered++
 			}
 		}
-		cr.Status = "no_matching_people"
-		if len(candidates) > 0 {
-			cr.Status = "no_contact_data"
-		}
-		if len(cr.Contacts) > 0 {
-			cr.Status = "review_required"
-			for _, b := range cr.Contacts {
-				if !b.NeedsReview {
-					cr.Status = "contacts_found"
-					break
-				}
-			}
-		}
-		if len(cr.Issues) > 0 && len(cr.Contacts) == 0 {
-			cr.Status = "incomplete"
-		}
+		cr.Contacts = kept
 	}
-	return r, nil
 }
 
 func (c *Client) contactJSON(ctx context.Context, op string, in Request) (map[string]any, error) {
@@ -408,6 +584,31 @@ func contactFieldStatus(m map[string]any, key string) string {
 func normalizeContactOptions(o *ContactOptions) error {
 	if len(o.Companies) == 0 || len(o.Companies) > 25 {
 		return errors.New("contacts requires 1..25 companies per run")
+	}
+	if o.Concurrency == 0 {
+		o.Concurrency = 4
+	}
+	if o.Concurrency < 1 || o.Concurrency > 16 {
+		return errors.New("concurrency must be 1..16")
+	}
+	if o.ContactFilter == "" {
+		o.ContactFilter = "all"
+	}
+	switch o.ContactFilter {
+	case "all", "any", "email", "phone", "both", "none", "valid-email":
+	default:
+		return errors.New("contact-filter must be all, any, email, phone, both, none, or valid-email")
+	}
+	if o.ContactFilter == "valid-email" && !o.ValidateEmails {
+		return errors.New("valid-email filter requires email validation")
+	}
+	if o.EmailsOnly && (o.ContactFilter == "phone" || o.ContactFilter == "both") {
+		return errors.New("phone filters cannot be combined with emails-only")
+	}
+	if o.ValidateEmails {
+		if err := normalizeContactValidationOptions(&o.ValidationOptions); err != nil {
+			return err
+		}
 	}
 	if o.MaxContacts == 0 {
 		o.MaxContacts = 2

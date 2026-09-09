@@ -20,7 +20,7 @@ type ClientFactory func(context.Context) (*mixrank.Client, error)
 const MaxOutputBytes int64 = 1 << 20
 
 func New(factory ClientFactory) *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "mixrank", Version: "0.2.0"}, nil)
+	s := mcp.NewServer(&mcp.Implementation{Name: "mixrank", Version: "0.3.0"}, nil)
 	for _, op := range catalog.Read().Operations {
 		props := map[string]any{}
 		required := []string{}

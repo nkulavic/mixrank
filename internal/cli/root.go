@@ -22,7 +22,7 @@ import (
 	"time"
 )
 
-var Version = "0.2.0"
+var Version = "0.3.0"
 
 func New() *cobra.Command {
 	root := &cobra.Command{Use: "mixrank", Short: "MixRank API, research skills and MCP toolkit", Version: Version, SilenceUsage: true, SilenceErrors: true}

@@ -32,7 +32,7 @@ mixrank api search-companies --body query.json
 For follow-up, turn the company results into actual contact records:
 
 ```sh
-mixrank contacts --companies companies.json --output contacts.json
+mixrank contacts --companies companies.json --concurrency 4 --validate-emails --output contacts.json
 mixrank contacts --domain example.com --max-contacts 2
 ```
 

@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$Version = '0.2.0'
+$Version = '0.3.0'
 $Arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLower()
 if ($Arch -eq 'x64') { $Arch = 'amd64' }
 if ($Arch -notin @('amd64','arm64')) { throw 'Unsupported architecture' }

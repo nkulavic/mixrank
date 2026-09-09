@@ -73,7 +73,15 @@ func TestHTTPMCPDiscoveryCallAndAuth(t *testing.T) {
 type bearerTransport struct{ token string }
 
 func TestMCPContactWorkflow(t *testing.T) {
+	submits := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/email/validate/bulk-job") {
+			if r.Method == "POST" {
+				submits++
+			}
+			fmt.Fprint(w, `{"id":"job-1","completed_at":null}`)
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "/_search") {
 			fmt.Fprintf(w, `{"hits":{"total":{"value":1,"relation":"eq"},"hits":[{"_id":"7","_source":{"person_id":7,"name":{"full":"Avery Morgan"},"updated_at":%q},"inner_hits":{"experience":{"hits":{"hits":[{"_source":{"company_id":123,"company_name":"Example","domain":"example.test","title":"Owner","is_current":true,"has_source_company_id":true}}]}}}}]}}`, time.Now().UTC().Format(time.RFC3339))
 			return
@@ -98,7 +106,7 @@ func TestMCPContactWorkflow(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer cs.Close()
-	r, e := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "mixrank_company_contacts", Arguments: map[string]any{"companies": []any{map[string]any{"company_ids": []int{123}, "domain": "example.test"}}, "max_contacts_per_company": 1}})
+	r, e := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "mixrank_company_contacts", Arguments: map[string]any{"companies": []any{map[string]any{"company_ids": []int{123}, "domain": "example.test"}}, "max_contacts_per_company": 1, "concurrency": 2, "contact_filter": "email", "validate_emails": true, "validation_wait_seconds": 0}})
 	if e != nil || r.IsError {
 		t.Fatal(e, r)
 	}
@@ -106,8 +114,15 @@ func TestMCPContactWorkflow(t *testing.T) {
 	if e = json.Unmarshal([]byte(r.Content[0].(*mcp.TextContent).Text), &report); e != nil {
 		t.Fatal(e)
 	}
-	if report.Companies[0].Contacts[0].BusinessEmails[0].Email != "avery@example.test" || report.RequestsMade != 2 {
+	if report.Companies[0].Contacts[0].BusinessEmails[0].Email != "avery@example.test" || report.RequestsMade != 3 || report.Validation == nil || report.Validation.Status != "pending" || report.Concurrency != 2 {
 		t.Fatal("workflow did not enrich contacts")
+	}
+	if report.ContactFilterApplied {
+		t.Fatal("pending validation lost resumable contacts")
+	}
+	resumed, e := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "mixrank_validate_contacts", Arguments: map[string]any{"report": report, "validation_wait_seconds": 0}})
+	if e != nil || resumed.IsError || submits != 1 {
+		t.Fatal("MCP validation resume failed", e)
 	}
 }
 
