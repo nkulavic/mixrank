@@ -6,8 +6,8 @@ ap=argparse.ArgumentParser();ap.add_argument('--release',action='store_true');ap
 def write(path,data):
  p=root/path;p.parent.mkdir(parents=True,exist_ok=True);b=json.dumps(data,indent=2)+'\n'
  if args.check:
-  if not p.exists() or p.read_text()!=b:raise SystemExit('Stale package file: '+str(path))
- else:p.write_text(b)
+  if not p.exists() or p.read_text(encoding="utf-8")!=b:raise SystemExit('Stale package file: '+str(path))
+ else:p.write_text(b,encoding="utf-8",newline="\n")
 base={'name':'mixrank','version':version,'description':'MixRank API tools, CLI recipes and evidence-based research workflows','author':{'name':'Nick Kulavic','url':'https://github.com/nkulavic'},'homepage':'https://github.com/nkulavic/mixrank','repository':'https://github.com/nkulavic/mixrank','license':'MIT'}
 codex={k:v for k,v in base.items() if k not in ['homepage','repository','license']};codex.update({'skills':'./skills/','mcpServers':'./.mcp.json','interface':{'displayName':'MixRank','shortDescription':'Research companies and people with MixRank.','longDescription':'Company and person discovery, enrichment, validation, technology research and private product context through a Go CLI and MCP server.','developerName':'Nick Kulavic','category':'Productivity','capabilities':[],'defaultPrompt':'Research companies and people with MixRank using my criteria.'}})
 claude={**base,'skills':'./skills','mcpServers':'./.mcp.json','userConfig':{'api_key':{'type':'string','title':'MixRank API key','description':'Your MixRank API credential. Claude manages secure storage.','sensitive':True,'required':True}}}
@@ -49,7 +49,7 @@ for goos in ['darwin','linux','windows']:
   bundle=dist/f'mcpb-{goos}-{arch}';bundle.mkdir(exist_ok=True);shutil.copy2(binary,bundle/binary.name)
   for notice in ['LICENSE','THIRD_PARTY_NOTICES.txt']:shutil.copy2(root/notice,bundle/notice)
   mf={'manifest_version':'0.3','name':'mixrank','display_name':'MixRank','version':version,'description':base['description'],'author':base['author'],'homepage':base['homepage'],'license':'MIT','server':{'type':'binary','entry_point':binary.name,'mcp_config':{'command':'${__dirname}/'+binary.name,'args':['mcp'],'env':{'MIXRANK_API_KEY':'${user_config.api_key}'}}},'compatibility':{'platforms':['win32' if goos=='windows' else goos]},'user_config':{'api_key':{'type':'string','title':'MixRank API key','description':'Your API key, stored by Claude Desktop','sensitive':True,'required':True}}}
-  (bundle/'manifest.json').write_text(json.dumps(mf,indent=2)+'\n')
+  (bundle/'manifest.json').write_text(json.dumps(mf,indent=2)+'\n',encoding='utf-8',newline='\n')
   with zipfile.ZipFile(dist/f'mixrank_{goos}_{arch}.mcpb','w',zipfile.ZIP_DEFLATED) as z:
    for f in bundle.iterdir():z.write(f,f.name)
 # Cache-independent universal plugin bundles.
@@ -87,5 +87,5 @@ with zipfile.ZipFile(dist/'mixrank-cowork.zip','w',zipfile.ZIP_DEFLATED) as z:
  z.writestr('CONNECTOR.md','Import this plugin in Cowork. Research requires the hosted MixRank connector once OAuth deployment is complete. Configure it in Cowork; host keychains and local Desktop MCP configuration are not available in the VM. General research/personalization skills can operate with supplied files meanwhile.\n')
 for name in ['install.sh','install.ps1']:shutil.copy2(root/name,dist/name)
 assets=sorted(p for p in dist.iterdir() if p.is_file() and p.name!='checksums.txt')
-(dist/'checksums.txt').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n' for p in assets))
+(dist/'checksums.txt').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n' for p in assets),encoding='utf-8',newline='\n')
 print('Release artifacts:',len(assets))
