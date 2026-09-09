@@ -23,4 +23,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh release create "$GITHUB_REF_NAME" --verify-tag --title "MixRank $GITHUB_REF_NAME" --notes-file docs/release-notes.md dist/*.tar.gz dist/*.zip dist/*.mcpb dist/checksums.txt dist/install.sh dist/install.ps1
+          version="$(python3 -c 'import json; print(json.load(open("plugin.json"))["version"])')"
+          assets=(
+            dist/checksums.txt
+            dist/install.sh
+            dist/install.ps1
+            dist/mixrank-claude*.zip
+            dist/mixrank-codex*.zip
+            dist/mixrank-cowork.zip
+            dist/mixrank_${version}_*.tar.gz
+            dist/mixrank_${version}_*.zip
+            dist/mixrank_*\.mcpb
+          )
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+            gh release edit "$GITHUB_REF_NAME" --title "MixRank $GITHUB_REF_NAME" --notes-file docs/release-notes.md --draft=false
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "MixRank $GITHUB_REF_NAME" --notes-file docs/release-notes.md "${assets[@]}"
+          fi
