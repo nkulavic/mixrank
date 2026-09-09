@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nkulavic/mixrank"
+	"github.com/nkulavic/mixrank/internal/credentials"
 	"github.com/spf13/cobra"
 )
 
@@ -65,6 +66,16 @@ func newContactsCommand(factory func(context.Context) (*mixrank.Client, error)) 
 		if e != nil {
 			return e
 		}
+		if opts.PlacesFallback {
+			key, _, e := credentials.ResolveGooglePlaces()
+			if e != nil {
+				return e
+			}
+			opts.Places, e = mixrank.NewPlacesClient(key, mixrank.PlacesOptions{})
+			if e != nil {
+				return e
+			}
+		}
 		ctx, cancel := context.WithTimeout(c.Context(), timeout)
 		defer cancel()
 		report, workflowErr := cl.CompanyContacts(ctx, opts)
@@ -80,6 +91,8 @@ func newContactsCommand(factory func(context.Context) (*mixrank.Client, error)) 
 	}}
 	c.Flags().IntVar(&opts.Concurrency, "concurrency", 4, "Maximum simultaneous company/person requests (1..16)")
 	c.Flags().StringVar(&opts.ContactFilter, "contact-filter", "all", "Return all, any, email, phone, both, none, or valid-email contacts")
+	c.Flags().BoolVar(&opts.ContactableOnly, "contactable-only", false, "Return only businesses with at least one email or phone; shorthand for --contact-filter any")
+	c.Flags().BoolVar(&opts.PlacesFallback, "places-fallback", false, "For businesses with no person-level channel, opt in to a Google Places business phone/website lookup")
 	c.Flags().BoolVar(&opts.ValidateEmails, "validate-emails", false, "Validate returned work emails through a deduplicated bulk job")
 	validationFlags(c, &opts.ValidationOptions)
 	c.AddCommand(newContactValidationCommand(factory))

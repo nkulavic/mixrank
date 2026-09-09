@@ -24,6 +24,10 @@ type CompanyTarget struct {
 	CompanyIDs    []string `json:"company_ids,omitempty"`
 	Domain        string   `json:"domain,omitempty"`
 	DomainAliases []string `json:"domain_aliases,omitempty"`
+	Website       string   `json:"website,omitempty"`
+	Locality      string   `json:"locality,omitempty"`
+	Region        string   `json:"region,omitempty"`
+	CountryCode   string   `json:"country_code,omitempty"`
 	Qualification string   `json:"qualification_status,omitempty"`
 }
 
@@ -36,6 +40,9 @@ type ContactOptions struct {
 	EmailsOnly        bool                     `json:"emails_only,omitempty"`
 	Concurrency       int                      `json:"concurrency,omitempty"`
 	ContactFilter     string                   `json:"contact_filter,omitempty"`
+	ContactableOnly   bool                     `json:"contactable_only,omitempty"`
+	PlacesFallback    bool                     `json:"places_fallback,omitempty"`
+	Places            *PlacesClient            `json:"-"`
 	ValidateEmails    bool                     `json:"validate_emails,omitempty"`
 	ValidationOptions ContactValidationOptions `json:"validation_options,omitempty"`
 }
@@ -57,6 +64,7 @@ type ContactEmployment struct {
 }
 
 type BusinessContact struct {
+	ContactType      string            `json:"contact_type"`
 	HasEmail         bool              `json:"has_email"`
 	HasPhone         bool              `json:"has_phone"`
 	EnrichmentStatus string            `json:"enrichment_status"`
@@ -68,6 +76,12 @@ type BusinessContact struct {
 	ProfileUpdatedAt string            `json:"profile_updated_at,omitempty"`
 	BusinessEmails   []BusinessEmail   `json:"business_emails"`
 	DirectDials      []string          `json:"direct_dials"`
+	BusinessPhones   []string          `json:"business_phones,omitempty"`
+	BusinessAddress  string            `json:"business_address,omitempty"`
+	PlaceID          string            `json:"place_id,omitempty"`
+	GoogleMapsURI    string            `json:"google_maps_uri,omitempty"`
+	WebsiteURI       string            `json:"website_uri,omitempty"`
+	Attributions     []string          `json:"attributions,omitempty"`
 	EmailStatus      string            `json:"email_status"`
 	PhoneStatus      string            `json:"phone_status"`
 	NeedsReview      bool              `json:"needs_review"`
@@ -89,6 +103,7 @@ type CompanyContactResult struct {
 	Contacts           []BusinessContact `json:"contacts"`
 	ContactsFiltered   int               `json:"contacts_filtered"`
 	Issues             []ContactIssue    `json:"issues"`
+	Places             *PlacesLookup     `json:"places_lookup,omitempty"`
 }
 
 type ContactReport struct {
@@ -97,6 +112,8 @@ type ContactReport struct {
 	Validation           *ContactValidationReport `json:"email_validation,omitempty"`
 	Concurrency          int                      `json:"concurrency"`
 	ContactFilter        string                   `json:"contact_filter"`
+	ContactableOnly      bool                     `json:"contactable_only"`
+	CompaniesFiltered    int                      `json:"companies_filtered"`
 	RetrievedAt          string                   `json:"retrieved_at_utc"`
 	Companies            []CompanyContactResult   `json:"companies"`
 	RequestsMade         int                      `json:"requests_made"`
@@ -117,9 +134,9 @@ func (c *Client) CompanyContacts(ctx context.Context, opts ContactOptions) (*Con
 	if err := normalizeContactOptions(&opts); err != nil {
 		return nil, err
 	}
-	r := &ContactReport{RetrievedAt: time.Now().UTC().Format(time.RFC3339), Complete: true, Roles: opts.Roles, Concurrency: opts.Concurrency, ContactFilter: opts.ContactFilter,
+	r := &ContactReport{RetrievedAt: time.Now().UTC().Format(time.RFC3339), Complete: true, Roles: opts.Roles, Concurrency: opts.Concurrency, ContactFilter: opts.ContactFilter, ContactableOnly: opts.ContactableOnly,
 		CompanyMerge: &CompanyMergeSummary{InputRecords: inputCompanies, UniqueCompanies: len(opts.Companies), DuplicatesMerged: inputCompanies - len(opts.Companies)},
-		Notes:        []string{"Contacts are provider-reported, not independently verified. B2B emails are restricted to the matched employer domain; unrelated work emails are omitted.", "Email validation is separate from contact availability. Direct dials are person-level numbers; line type and company association are not verified.", "Current employment is a cached observation. Missing, old, inferred or conflicting evidence is marked for review.", "All discovered people use contacts, including unavailable and not-enriched rows. Filters affect returned rows, not company-level coverage or errors."}}
+		Notes:        []string{"Contacts are provider-reported, not independently verified. B2B emails are restricted to the matched employer domain; unrelated work emails are omitted.", "Email validation is separate from contact availability. Direct dials are person-level numbers; line type and company association are not verified.", "Current employment is a cached observation. Missing, old, inferred or conflicting evidence is marked for review.", "All discovered people use contacts, including unavailable and not-enriched rows. Filters affect returned rows, not company-level coverage or errors.", "Google Places fallback is opt-in, run-scoped and returns business listing phones/websites only; it never supplies an individual email."}}
 	for _, co := range opts.Companies {
 		r.Companies = append(r.Companies, CompanyContactResult{Company: co, Status: "not_processed", Contacts: []BusinessContact{}, Issues: []ContactIssue{}})
 	}
@@ -203,6 +220,29 @@ func (w *contactWork) request(ctx context.Context, op string, in Request) (map[s
 	}
 	return v, err
 }
+
+func (w *contactWork) lookupPlaces(ctx context.Context, places *PlacesClient, company CompanyTarget) (*PlacesLookup, error) {
+	select {
+	case w.slots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, errors.Join(errContactNotStarted, context.Cause(ctx))
+	}
+	defer func() { <-w.slots }()
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Join(errContactNotStarted, context.Cause(ctx))
+	}
+	for {
+		used := w.calls.Load()
+		if used >= w.max {
+			return nil, errContactBudget
+		}
+		if w.calls.CompareAndSwap(used, used+1) {
+			break
+		}
+	}
+	return places.MatchCompany(ctx, company)
+}
+
 func (c *Client) contactCompany(ctx context.Context, cr *CompanyContactResult, opts ContactOptions, work *contactWork) {
 	if ctx.Err() != nil {
 		return
@@ -279,6 +319,9 @@ func (c *Client) contactCompany(ctx context.Context, cr *CompanyContactResult, o
 		}
 	}
 	cr.Contacts = kept
+	if opts.PlacesFallback {
+		c.addPlacesFallback(ctx, cr, opts, work)
+	}
 	cr.Status = "no_matching_people"
 	if len(cr.Contacts) > 0 {
 		cr.Status = "no_contact_data"
@@ -297,6 +340,59 @@ func (c *Client) contactCompany(ctx context.Context, cr *CompanyContactResult, o
 		cr.Status = "incomplete"
 	}
 }
+
+func (c *Client) addPlacesFallback(ctx context.Context, cr *CompanyContactResult, opts ContactOptions, work *contactWork) {
+	if hasBusinessChannel(cr.Contacts) {
+		cr.Places = &PlacesLookup{Status: "skipped_has_contact"}
+		return
+	}
+	if opts.Places == nil {
+		cr.Places = &PlacesLookup{Status: "not_configured"}
+		cr.Issues = append(cr.Issues, ContactIssue{Reason: "places fallback requested but Google Places credentials are not configured"})
+		return
+	}
+	lookup, err := work.lookupPlaces(ctx, opts.Places, cr.Company)
+	if lookup == nil {
+		lookup = &PlacesLookup{Status: "error"}
+	}
+	cr.Places = lookup
+	if err != nil {
+		if errors.Is(err, errContactBudget) {
+			lookup.Status = "budget_exhausted"
+		}
+		cr.Issues = append(cr.Issues, ContactIssue{Reason: c.Redact(err.Error())})
+		return
+	}
+	if lookup.Status != "matched" || lookup.Matched == nil {
+		return
+	}
+	p := lookup.Matched
+	phone := p.NationalPhoneNumber
+	if phone == "" {
+		phone = p.InternationalPhoneNumber
+	}
+	attrs := append([]string(nil), p.Attributions...)
+	if len(attrs) == 0 {
+		attrs = []string{"Google Maps"}
+	}
+	b := BusinessContact{ContactType: "business", Name: p.DisplayName, Title: "Business listing", BusinessEmails: []BusinessEmail{}, DirectDials: []string{}, BusinessPhones: []string{}, ReviewReasons: []string{}, Source: "Google Places business listing", EmailStatus: "not_available", PhoneStatus: "unavailable", EnrichmentStatus: "complete", PlaceID: p.PlaceID, GoogleMapsURI: p.GoogleMapsURI, WebsiteURI: p.WebsiteURI, BusinessAddress: p.FormattedAddress, Attributions: attrs}
+	if phone != "" {
+		b.BusinessPhones = []string{phone}
+		b.HasPhone = true
+		b.PhoneStatus = "available"
+	}
+	cr.Contacts = append(cr.Contacts, b)
+}
+
+func hasBusinessChannel(contacts []BusinessContact) bool {
+	for _, b := range contacts {
+		if b.HasEmail || b.HasPhone {
+			return true
+		}
+	}
+	return false
+}
+
 func contactCandidates(cr *CompanyContactResult, opts ContactOptions, v map[string]any) []BusinessContact {
 	candidates := []BusinessContact{}
 	seen := map[string]bool{}
@@ -336,7 +432,7 @@ func contactCandidates(cr *CompanyContactResult, opts ContactOptions, v map[stri
 			cr.Issues = append(cr.Issues, ContactIssue{pid, "no consistent current employer and role evidence in the same experience record"})
 			continue
 		}
-		b := BusinessContact{PersonID: pid, Name: str(object(src["name"])["full"]), Title: str(chosen["title"]), LinkedInURL: str(src["public_profile_url"]), ProfileUpdatedAt: str(src["updated_at"]), BusinessEmails: []BusinessEmail{}, DirectDials: []string{}, ReviewReasons: []string{}, Source: "MixRank person2 search + person overview (b2b_emails,directdials)", Employment: ContactEmployment{CompanyID: str(chosen["company_id"]), CompanyName: str(chosen["company_name"]), Domain: cleanDomain(str(chosen["domain"])), Title: str(chosen["title"]), IsCurrent: true}}
+		b := BusinessContact{ContactType: "person", PersonID: pid, Name: str(object(src["name"])["full"]), Title: str(chosen["title"]), LinkedInURL: str(src["public_profile_url"]), ProfileUpdatedAt: str(src["updated_at"]), BusinessEmails: []BusinessEmail{}, DirectDials: []string{}, ReviewReasons: []string{}, Source: "MixRank person2 search + person overview (b2b_emails,directdials)", Employment: ContactEmployment{CompanyID: str(chosen["company_id"]), CompanyName: str(chosen["company_name"]), Domain: cleanDomain(str(chosen["domain"])), Title: str(chosen["title"]), IsCurrent: true}}
 		if linked, ok := chosen["has_source_company_id"].(bool); ok {
 			b.Employment.SourceLinked = &linked
 		}
@@ -491,6 +587,17 @@ func filterContactReport(r *ContactReport, filter string) {
 		}
 		cr.Contacts = kept
 	}
+	if r.ContactableOnly {
+		kept := make([]CompanyContactResult, 0, len(r.Companies))
+		for _, cr := range r.Companies {
+			if len(cr.Contacts) == 0 {
+				r.CompaniesFiltered++
+				continue
+			}
+			kept = append(kept, cr)
+		}
+		r.Companies = kept
+	}
 }
 
 func (c *Client) contactJSON(ctx context.Context, op string, in Request) (map[string]any, error) {
@@ -597,6 +704,13 @@ func normalizeContactOptions(o *ContactOptions) error {
 	if o.ContactFilter == "" {
 		o.ContactFilter = "all"
 	}
+	if o.ContactableOnly {
+		if o.ContactFilter == "all" {
+			o.ContactFilter = "any"
+		} else if o.ContactFilter != "any" {
+			return errors.New("contactable-only requires contact-filter any or the default filter")
+		}
+	}
 	switch o.ContactFilter {
 	case "all", "any", "email", "phone", "both", "none", "valid-email":
 	default:
@@ -699,7 +813,16 @@ func ParseCompanyTargets(reader io.Reader) ([]CompanyTarget, error) {
 		if co := object(m["company"]); co != nil {
 			m = co
 		}
-		co := CompanyTarget{Name: str(m["name"]), Domain: str(m["domain"]), Qualification: str(m["qualification_status"])}
+		co := CompanyTarget{Name: str(m["name"]), Domain: str(m["domain"]), Website: str(m["website"]), Locality: str(m["locality"]), Region: str(m["region"]), CountryCode: str(m["country_code"]), Qualification: str(m["qualification_status"])}
+		if co.Website == "" {
+			co.Website = str(m["website_url"])
+		}
+		if co.Locality == "" {
+			co.Locality = str(m["city"])
+		}
+		if co.Region == "" {
+			co.Region = str(m["state"])
+		}
 		for _, v := range array(m["name_aliases"]) {
 			co.NameAliases = append(co.NameAliases, str(v))
 		}

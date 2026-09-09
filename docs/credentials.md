@@ -2,9 +2,12 @@
 
 The toolkit never takes an API key as a command argument. `mixrank auth login` masks input; `--stdin` permits an explicit pipe. A nonempty `MIXRANK_API_KEY` is the runtime override. Status commands expose source and availability only.
 
+The optional Google Places fallback uses `mixrank auth google-places login|status|logout`. It checks `GOOGLE_PLACES_API_KEY`, then `GOOGLE_MAPS_API_KEY`, before the toolkit-owned OS-vault entry `com.nkulavic.mixrank.google-places` with account `default`. The Places key is only sent in the `X-Goog-Api-Key` header and is never included in reports or logs.
+
 | Client | Secret owner and injection |
 |---|---|
 | Codex CLI/Desktop, native CLI, generic local MCP | MixRank-owned OS-vault service `com.nkulavic.mixrank`, account `default`; environment override first |
+| Codex/Claude local fallback | Optional Google Places key from `GOOGLE_PLACES_API_KEY` or toolkit OS-vault service `com.nkulavic.mixrank.google-places`; Claude manifests expose a separate sensitive field |
 | Claude Code plugin | Sensitive manifest `userConfig.api_key`, injected as `${user_config.api_key}` into `MIXRANK_API_KEY` |
 | Claude Desktop MCPB | Sensitive `user_config.api_key`; Desktop manages encrypted storage and runtime injection |
 | Cowork | Its own connector authentication, inside the Cowork runtime; no copied host credentials |

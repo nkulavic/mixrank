@@ -5,6 +5,7 @@
 ```sh
 mixrank contacts --domain example.com --concurrency 4
 mixrank contacts --companies companies.json --contact-filter email --output contacts.json
+mixrank contacts --companies companies.json --contactable-only --places-fallback --output contacts.json
 mixrank contacts --companies companies.json --roles 'owner,president,office manager' \
   --validate-emails --validation-wait 30s --concurrency 4 --output contacts.json
 mixrank contacts validate --input contacts.json --validation-wait 2m --output validated.json
@@ -55,6 +56,22 @@ Every consistent discovered person appears under their company's `contacts`. Eac
 | `valid-email` | At least one email whose provider validity is exactly `valid`; requires `--validate-emails` |
 
 Company rows remain present when filters return no people. `contacts_filtered` counts omitted rows. If validation is pending, filtering is deferred (`contact_filter_applied: false`) to preserve the complete submitted email set for resumption. Resuming the job applies the requested filter after completion. Review flags remain separate from channel availability and deliverability.
+
+`--contactable-only` is the company-level convenience mode for lead lists. It changes the filter to `any` (email or phone), removes businesses whose `contacts` array is empty after filtering, and reports the number omitted in `companies_filtered`. It does not hide a person's missing channel data inside a retained company. The MCP equivalent is `contactable_only: true`.
+
+## Optional Google Places fallback
+
+`--places-fallback` and MCP `places_fallback: true` make one explicit Google Places (New) text lookup for a business only when MixRank found no person-level email or phone. The result is merged into the same `contacts` array as a row with `contact_type: "business"`, `source: "Google Places business listing"`, `business_phones`, `website_uri`, `place_id`, `google_maps_uri`, and `business_address`. A business listing phone is not a person direct dial, and Places does not provide individual email addresses. An ambiguous listing is kept in `places_lookup` for review and is never turned into a contact row.
+
+Configure the optional key through the same OS-vault workflow used by the CLI:
+
+```sh
+mixrank auth google-places login
+printf '%s' "$GOOGLE_PLACES_API_KEY" | mixrank auth google-places login --stdin
+mixrank auth google-places status
+```
+
+The runtime checks `GOOGLE_PLACES_API_KEY`, then `GOOGLE_MAPS_API_KEY`, then the toolkit-owned OS entry `com.nkulavic.mixrank.google-places`/`default`. The fallback is disabled by default, counts against the shared request budget and is never automatically retried. The SDK does not cache Places content or add it to maintained profiles. Keep the returned Google Maps attribution when displaying listing data and retain only the `place_id` if a durable reference is needed. See Google's [Places data policies](https://developers.google.com/maps/documentation/places/web-service/policies), [field and billing guidance](https://developers.google.com/maps/documentation/places/web-service/data-fields), and [Text Search request](https://developers.google.com/maps/documentation/places/web-service/text-search).
 
 `--max-contacts` is the enrichment stopping target, default two people with requested channels per company, maximum five. For `email`, `phone`, or `both`, that channel criterion controls the target. `valid-email` searches for emails, then filters by validation; it cannot promise that two will validate. `all` may return more than two rows because it also keeps discovered people without channels or not yet enriched. `--max-candidates` limits discovery to ten people by default, maximum 25. Up to 250 input rows are accepted, with at most 25 unique companies after merging.
 

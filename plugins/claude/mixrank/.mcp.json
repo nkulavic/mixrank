@@ -6,7 +6,8 @@
         "mcp"
       ],
       "env": {
-        "MIXRANK_API_KEY": "${user_config.api_key}"
+        "MIXRANK_API_KEY": "${user_config.api_key}",
+        "GOOGLE_PLACES_API_KEY": "${user_config.google_places_api_key}"
       }
     }
   }

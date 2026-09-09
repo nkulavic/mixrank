@@ -51,3 +51,5 @@ The JSON returned by Elasticsearch retains `_source`, hit scores, sort cursors, 
 ## Duplicate company rows
 
 Pass company arrays or Elasticsearch hits directly to `mixrank contacts --companies FILE` (MCP: `mixrank_company_contacts`). The shared workflow merges exact company-ID/domain matches before lookup, retaining alternate IDs, names and domains. Inspect `company_merge` for input and unique counts. No extra deduplication script is needed.
+
+For a lead-ready response, add `--contactable-only` (MCP `contactable_only: true`) to keep only companies with at least one email or phone. If MixRank returns no person-level channel, opt into `--places-fallback` (MCP `places_fallback: true`) to add a matched business listing phone and website in the same `contacts` array. Configure the separate Places credential with `mixrank auth google-places login`; Places does not return individual emails, and ambiguous matches remain in `places_lookup`.

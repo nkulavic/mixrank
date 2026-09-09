@@ -22,7 +22,7 @@ import (
 	"time"
 )
 
-var Version = "0.4.0"
+var Version = "0.5.0"
 
 func New() *cobra.Command {
 	root := &cobra.Command{Use: "mixrank", Short: "MixRank API, research skills and MCP toolkit", Version: Version, SilenceUsage: true, SilenceErrors: true}
@@ -70,7 +70,7 @@ func endpoints() *cobra.Command {
 	return c
 }
 func auth() *cobra.Command {
-	p := &cobra.Command{Use: "auth", Short: "Manage MixRank's OS-vault credential"}
+	p := &cobra.Command{Use: "auth", Short: "Manage toolkit provider credentials"}
 	var stdin bool
 	login := &cobra.Command{Use: "login", Short: "Save a masked API key in the OS credential store", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
 		var b []byte
@@ -113,6 +113,50 @@ func auth() *cobra.Command {
 		return jsonOut(c, map[string]any{"deleted": true, "environment_override_present": os.Getenv("MIXRANK_API_KEY") != ""})
 	}}
 	p.AddCommand(login, status, logout)
+	places := &cobra.Command{Use: "google-places", Short: "Manage Google Places fallback credentials"}
+	var placesStdin bool
+	placesLogin := &cobra.Command{Use: "login", Short: "Save a masked Google Places API key in the OS credential store", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+		var b []byte
+		var e error
+		if placesStdin {
+			b, e = io.ReadAll(io.LimitReader(c.InOrStdin(), 4097))
+			if len(b) > 4096 {
+				return errors.New("credential input too long")
+			}
+		} else {
+			if !term.IsTerminal(int(os.Stdin.Fd())) {
+				return errors.New("no interactive terminal; pipe the key with --stdin")
+			}
+			fmt.Fprint(c.ErrOrStderr(), "Google Places API key: ")
+			b, e = term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Fprintln(c.ErrOrStderr())
+		}
+		if e != nil {
+			return errors.New("credential input failed")
+		}
+		defer func() {
+			for i := range b {
+				b[i] = 0
+			}
+		}()
+		if e = credentials.SaveGooglePlaces(strings.TrimSpace(string(b))); e != nil {
+			return e
+		}
+		return jsonOut(c, map[string]any{"saved": true, "storage": "os-vault", "service": credentials.PlacesService, "account": credentials.PlacesAccount})
+	}}
+	placesLogin.Flags().BoolVar(&placesStdin, "stdin", false, "Read key from stdin; never pass it as an argument")
+	placesStatus := &cobra.Command{Use: "status", Short: "Report Google Places credential availability without revealing it", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+		_, source, e := credentials.ResolveGooglePlaces()
+		return jsonOut(c, map[string]any{"configured": e == nil, "source": source, "service": credentials.PlacesService, "account": credentials.PlacesAccount})
+	}}
+	placesLogout := &cobra.Command{Use: "logout", Short: "Delete the toolkit's Google Places OS-vault entry", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+		if e := credentials.DeleteGooglePlaces(); e != nil {
+			return e
+		}
+		return jsonOut(c, map[string]any{"deleted": true, "environment_override_present": os.Getenv("GOOGLE_PLACES_API_KEY") != "" || os.Getenv("GOOGLE_MAPS_API_KEY") != ""})
+	}}
+	places.AddCommand(placesLogin, placesStatus, placesLogout)
+	p.AddCommand(places)
 	return p
 }
 
@@ -369,9 +413,9 @@ func mcpCommand() *cobra.Command {
 	c := &cobra.Command{Use: "mcp", Short: "Run stdio or authenticated Streamable HTTP MCP", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
 		switch transport {
 		case "stdio":
-			return mcpserver.Stdio(c.Context(), client)
+			return mcpserver.StdioWithPlaces(c.Context(), client, placesClient)
 		case "http":
-			return mcpserver.Serve(c.Context(), addr, httpClientFactory, mcpserver.HTTPOptions{BearerToken: os.Getenv("MIXRANK_MCP_TOKEN"), AllowedOrigins: origins})
+			return mcpserver.ServeWithPlaces(c.Context(), addr, httpClientFactory, httpPlacesClient, mcpserver.HTTPOptions{BearerToken: os.Getenv("MIXRANK_MCP_TOKEN"), AllowedOrigins: origins})
 		default:
 			return errors.New("transport must be stdio or http")
 		}
@@ -385,7 +429,8 @@ func doctor() *cobra.Command {
 	var live bool
 	c := &cobra.Command{Use: "doctor", Short: "Local diagnostics; optional single /echo authentication check", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
 		_, source, e := credentials.Resolve()
-		checks := map[string]any{"version": Version, "catalog_operations": len(catalog.Read().Operations), "credential_available": e == nil, "credential_source": source}
+		_, placesSource, placesErr := credentials.ResolveGooglePlaces()
+		checks := map[string]any{"version": Version, "catalog_operations": len(catalog.Read().Operations), "credential_available": e == nil, "credential_source": source, "places_credential_available": placesErr == nil, "places_credential_source": placesSource}
 		if live {
 			cl, e := client(c.Context())
 			if e != nil {
@@ -450,4 +495,23 @@ func httpClientFactory(ctx context.Context) (*mixrank.Client, error) {
 		return nil, errors.New("HTTP MCP requires upstream MIXRANK_API_KEY from server environment")
 	}
 	return mixrank.New(key, mixrank.Options{Retries: 2, InMemoryCoordination: true})
+}
+
+func placesClient(ctx context.Context) (*mixrank.PlacesClient, error) {
+	key, _, err := credentials.ResolveGooglePlaces()
+	if err != nil {
+		return nil, err
+	}
+	return mixrank.NewPlacesClient(key, mixrank.PlacesOptions{})
+}
+
+func httpPlacesClient(ctx context.Context) (*mixrank.PlacesClient, error) {
+	key := os.Getenv("GOOGLE_PLACES_API_KEY")
+	if key == "" {
+		key = os.Getenv("GOOGLE_MAPS_API_KEY")
+	}
+	if key == "" {
+		return nil, errors.New("HTTP MCP places fallback requires GOOGLE_PLACES_API_KEY from server environment")
+	}
+	return mixrank.NewPlacesClient(key, mixrank.PlacesOptions{})
 }

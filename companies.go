@@ -34,11 +34,15 @@ func MergeCompanyTargets(input []CompanyTarget) ([]CompanyTarget, error) {
 	identities := map[string]int{}
 	for i, co := range input {
 		parent[i] = i
-		n := CompanyTarget{Qualification: strings.TrimSpace(co.Qualification)}
+		n := CompanyTarget{Qualification: strings.TrimSpace(co.Qualification), Website: strings.TrimSpace(co.Website), Locality: strings.TrimSpace(co.Locality), Region: strings.TrimSpace(co.Region), CountryCode: strings.TrimSpace(co.CountryCode)}
 		for _, name := range append([]string{co.Name}, co.NameAliases...) {
 			addCompanyName(&n, strings.TrimSpace(name))
 		}
-		for _, domain := range append([]string{co.Domain}, co.DomainAliases...) {
+		domainValues := append([]string{co.Domain}, co.DomainAliases...)
+		if co.Domain == "" && co.Website != "" {
+			domainValues = append(domainValues, co.Website)
+		}
+		for _, domain := range domainValues {
 			if strings.TrimSpace(domain) == "" {
 				continue
 			}
@@ -99,6 +103,18 @@ func MergeCompanyTargets(input []CompanyTarget) ([]CompanyTarget, error) {
 			target.Qualification = co.Qualification
 		} else if co.Qualification != "" && target.Qualification != co.Qualification {
 			target.Qualification = "needs_review"
+		}
+		if target.Website == "" {
+			target.Website = co.Website
+		}
+		if target.Locality == "" {
+			target.Locality = co.Locality
+		}
+		if target.Region == "" {
+			target.Region = co.Region
+		}
+		if target.CountryCode == "" {
+			target.CountryCode = co.CountryCode
 		}
 		if len(target.CompanyIDs) > 10 || len(companyDomains(*target)) > 10 {
 			return nil, errors.New("merged company exceeds 10 IDs or 10 domains; narrow the input")

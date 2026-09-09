@@ -34,9 +34,12 @@ For follow-up, turn the company results into actual contact records:
 ```sh
 mixrank contacts --companies companies.json --concurrency 4 --validate-emails --output contacts.json
 mixrank contacts --domain example.com --max-contacts 2
+mixrank contacts --companies companies.json --contactable-only --places-fallback --output contacts.json
 ```
 
 This automatically merges duplicate company IDs/domains, finds current relevant people, and retrieves available business emails and direct dials, with source dates, missing-data statuses and review flags. Alternate names, IDs and domains are retained; duplicate accounts consume one lookup workflow. The SDK and MCP expose the same workflow through `CompanyContacts` and `mixrank_company_contacts`. [Contact workflow](docs/contacts.md).
+
+`--contactable-only` is the compact lead-list mode: it keeps only businesses with at least one email or phone. The optional `--places-fallback` adds a clearly labeled Google Places business phone and website row for companies where MixRank found no person-level channel; it does not invent or infer individual emails. The same options are available to `mixrank_company_contacts` as `contactable_only` and `places_fallback`.
 
 ## SDK and MCP
 

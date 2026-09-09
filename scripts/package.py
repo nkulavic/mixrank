@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate synchronized agent packages; --release adds native binaries and archives."""
 import argparse,hashlib,json,os,pathlib,shutil,subprocess,tarfile,zipfile
-root=pathlib.Path(__file__).resolve().parents[1];version='0.4.0'
+root=pathlib.Path(__file__).resolve().parents[1];version='0.5.0'
 ap=argparse.ArgumentParser();ap.add_argument('--release',action='store_true');ap.add_argument('--reuse-binaries',action='store_true',help='Repackage already-built binaries without recompiling');ap.add_argument('--check',action='store_true');args=ap.parse_args()
 def write(path,data):
  p=root/path;p.parent.mkdir(parents=True,exist_ok=True);b=json.dumps(data,indent=2)+'\n'
@@ -10,10 +10,10 @@ def write(path,data):
  else:p.write_text(b,encoding="utf-8",newline="\n")
 base={'name':'mixrank','version':version,'description':'MixRank API tools, CLI recipes and evidence-based research workflows','author':{'name':'Nick Kulavic','url':'https://github.com/nkulavic'},'homepage':'https://github.com/nkulavic/mixrank','repository':'https://github.com/nkulavic/mixrank','license':'MIT'}
 codex={k:v for k,v in base.items() if k not in ['homepage','repository','license']};codex.update({'skills':'./skills/','mcpServers':'./.mcp.json','interface':{'displayName':'MixRank','shortDescription':'Research companies and people with MixRank.','longDescription':'Company and person discovery, enrichment, validation, technology research and private product context through a Go CLI and MCP server.','developerName':'Nick Kulavic','category':'Productivity','capabilities':[],'defaultPrompt':'Research companies and people with MixRank using my criteria.'}})
-claude={**base,'skills':'./skills','mcpServers':'./.mcp.json','userConfig':{'api_key':{'type':'string','title':'MixRank API key','description':'Your MixRank API credential. Claude manages secure storage.','sensitive':True,'required':True}}}
+claude={**base,'skills':'./skills','mcpServers':'./.mcp.json','userConfig':{'api_key':{'type':'string','title':'MixRank API key','description':'Your MixRank API credential. Claude manages secure storage.','sensitive':True,'required':True},'google_places_api_key':{'type':'string','title':'Google Places API key','description':'Optional key for the explicit Google Places contact fallback.','sensitive':True,'required':False}}}
 # Source and GitHub packages use a pinned launcher; release bundles also include binaries.
-cmcp={'mcpServers':{'mixrank':{'command':'${CLAUDE_PLUGIN_ROOT}/scripts/run-mixrank','args':['mcp'],'env':{'MIXRANK_API_KEY':'${user_config.api_key}'}}}}
-xmcp={'mcpServers':{'mixrank':{'command':'./scripts/run-mixrank','cwd':'.','args':['mcp'],'env_vars':['MIXRANK_API_KEY']}}}
+cmcp={'mcpServers':{'mixrank':{'command':'${CLAUDE_PLUGIN_ROOT}/scripts/run-mixrank','args':['mcp'],'env':{'MIXRANK_API_KEY':'${user_config.api_key}','GOOGLE_PLACES_API_KEY':'${user_config.google_places_api_key}'}}}}
+xmcp={'mcpServers':{'mixrank':{'command':'./scripts/run-mixrank','cwd':'.','args':['mcp'],'env_vars':['MIXRANK_API_KEY','GOOGLE_PLACES_API_KEY']}}}
 write('.codex-plugin/plugin.json',codex);write('.mcp.json',xmcp)
 portable={**base,'$schema':'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json','extensions':{'com.openai':{'interface':codex['interface']}}}
 pmcp={'$schema':'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json','mcpServers':{'mixrank':{'type':'stdio','command':'./scripts/run-mixrank','args':['mcp']}}}
@@ -48,7 +48,7 @@ for goos in ['darwin','linux','windows']:
   # Native Desktop extension; one architecture per package avoids host ambiguity.
   bundle=dist/f'mcpb-{goos}-{arch}';bundle.mkdir(exist_ok=True);shutil.copy2(binary,bundle/binary.name)
   for notice in ['LICENSE','THIRD_PARTY_NOTICES.txt']:shutil.copy2(root/notice,bundle/notice)
-  mf={'manifest_version':'0.3','name':'mixrank','display_name':'MixRank','version':version,'description':base['description'],'author':base['author'],'homepage':base['homepage'],'license':'MIT','server':{'type':'binary','entry_point':binary.name,'mcp_config':{'command':'${__dirname}/'+binary.name,'args':['mcp'],'env':{'MIXRANK_API_KEY':'${user_config.api_key}'}}},'compatibility':{'platforms':['win32' if goos=='windows' else goos]},'user_config':{'api_key':{'type':'string','title':'MixRank API key','description':'Your API key, stored by Claude Desktop','sensitive':True,'required':True}}}
+  mf={'manifest_version':'0.3','name':'mixrank','display_name':'MixRank','version':version,'description':base['description'],'author':base['author'],'homepage':base['homepage'],'license':'MIT','server':{'type':'binary','entry_point':binary.name,'mcp_config':{'command':'${__dirname}/'+binary.name,'args':['mcp'],'env':{'MIXRANK_API_KEY':'${user_config.api_key}','GOOGLE_PLACES_API_KEY':'${user_config.google_places_api_key}'}}},'compatibility':{'platforms':['win32' if goos=='windows' else goos]},'user_config':{'api_key':{'type':'string','title':'MixRank API key','description':'Your API key, stored by Claude Desktop','sensitive':True,'required':True},'google_places_api_key':{'type':'string','title':'Google Places API key','description':'Optional key for the explicit Google Places contact fallback','sensitive':True,'required':False}}}
   (bundle/'manifest.json').write_text(json.dumps(mf,indent=2)+'\n',encoding='utf-8',newline='\n')
   with zipfile.ZipFile(dist/f'mixrank_{goos}_{arch}.mcpb','w',zipfile.ZIP_DEFLATED) as z:
    for f in bundle.iterdir():z.write(f,f.name)
@@ -68,8 +68,8 @@ for label,source in [('codex',root/'plugins/mixrank'),('claude',root/'plugins/cl
    name='mixrank'+('.exe' if goos=='windows' else '')
    variable='.' if label=='codex' else '${CLAUDE_PLUGIN_ROOT}'
    config={'mcpServers':{'mixrank':{'command':variable+'/bin/'+name,'args':['mcp']}}}
-   if label=='claude':config['mcpServers']['mixrank']['env']={'MIXRANK_API_KEY':'${user_config.api_key}'}
-   else:config['mcpServers']['mixrank'].update({'env_vars':['MIXRANK_API_KEY'],'cwd':'.'})
+   if label=='claude':config['mcpServers']['mixrank']['env']={'MIXRANK_API_KEY':'${user_config.api_key}','GOOGLE_PLACES_API_KEY':'${user_config.google_places_api_key}'}
+   else:config['mcpServers']['mixrank'].update({'env_vars':['MIXRANK_API_KEY','GOOGLE_PLACES_API_KEY'],'cwd':'.'})
    with zipfile.ZipFile(dist/f'mixrank-{label}-{goos}-{arch}.zip','w',zipfile.ZIP_DEFLATED) as z:
     for notice in ['LICENSE','THIRD_PARTY_NOTICES.txt']:z.write(root/notice,notice)
     for f in source.rglob('*'):

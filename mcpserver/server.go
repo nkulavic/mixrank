@@ -16,11 +16,16 @@ import (
 )
 
 type ClientFactory func(context.Context) (*mixrank.Client, error)
+type PlacesFactory func(context.Context) (*mixrank.PlacesClient, error)
 
 const MaxOutputBytes int64 = 1 << 20
 
 func New(factory ClientFactory) *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "mixrank", Version: "0.4.0"}, nil)
+	return NewWithPlaces(factory, nil)
+}
+
+func NewWithPlaces(factory ClientFactory, placesFactory PlacesFactory) *mcp.Server {
+	s := mcp.NewServer(&mcp.Implementation{Name: "mixrank", Version: "0.5.0"}, nil)
 	for _, op := range catalog.Read().Operations {
 		props := map[string]any{}
 		required := []string{}
@@ -110,7 +115,7 @@ func New(factory ClientFactory) *mcp.Server {
 		}
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}}, nil
 	})
-	addContactTool(s, factory)
+	addContactTool(s, factory, placesFactory)
 	return s
 }
 func validIndex(s string) bool {
@@ -129,6 +134,10 @@ func Stdio(ctx context.Context, factory ClientFactory) error {
 	return New(factory).Run(ctx, &mcp.StdioTransport{})
 }
 
+func StdioWithPlaces(ctx context.Context, factory ClientFactory, placesFactory PlacesFactory) error {
+	return NewWithPlaces(factory, placesFactory).Run(ctx, &mcp.StdioTransport{})
+}
+
 // HTTPOptions supports a local bearer credential or an externally implemented
 // OAuth verifier. A verifier must validate issuer, audience, expiry and scopes.
 // A static bearer is for private development; it is not a claimed OAuth flow.
@@ -139,13 +148,17 @@ type HTTPOptions struct {
 }
 
 func Handler(factory ClientFactory, opts HTTPOptions) (http.Handler, error) {
+	return HandlerWithPlaces(factory, nil, opts)
+}
+
+func HandlerWithPlaces(factory ClientFactory, placesFactory PlacesFactory, opts HTTPOptions) (http.Handler, error) {
 	if opts.BearerToken == "" && opts.Authorize == nil {
 		return nil, errors.New("HTTP MCP requires authentication")
 	}
 	if opts.BearerToken != "" && len(opts.BearerToken) < 32 {
 		return nil, errors.New("HTTP bearer token must contain at least 32 characters")
 	}
-	server := New(factory)
+	server := NewWithPlaces(factory, placesFactory)
 	base := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, MaxRequestBodyBytes: 4 << 20, PropagateRequestCancellation: true})
 	origins := map[string]bool{}
 	for _, o := range opts.AllowedOrigins {
@@ -194,6 +207,18 @@ func Serve(ctx context.Context, addr string, factory ClientFactory, opts HTTPOpt
 	if e != nil {
 		return e
 	}
+	return serveHandler(ctx, addr, h)
+}
+
+func ServeWithPlaces(ctx context.Context, addr string, factory ClientFactory, placesFactory PlacesFactory, opts HTTPOptions) error {
+	h, e := HandlerWithPlaces(factory, placesFactory, opts)
+	if e != nil {
+		return e
+	}
+	return serveHandler(ctx, addr, h)
+}
+
+func serveHandler(ctx context.Context, addr string, h http.Handler) error {
 	s := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
 	done := make(chan struct{})
 	defer close(done)
@@ -206,8 +231,8 @@ func Serve(ctx context.Context, addr string, factory ClientFactory, opts HTTPOpt
 		case <-done:
 		}
 	}()
-	if e = s.ListenAndServe(); e != nil && e != http.ErrServerClosed {
-		return fmt.Errorf("HTTP listener failed: %w", e)
+	if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return fmt.Errorf("HTTP listener failed: %w", err)
 	}
 	return nil
 }

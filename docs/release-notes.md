@@ -1,3 +1,13 @@
+# MixRank v0.5.0
+
+Adds company-level contactability and an explicit Google Places fallback.
+
+- `--contactable-only` and MCP `contactable_only` return only businesses with an email or phone and report omitted businesses in `companies_filtered`.
+- Contact rows now identify `contact_type: person|business`; Places business listings include a phone, website, place ID and attribution without being represented as person direct dials.
+- `--places-fallback` and MCP `places_fallback` perform one bounded, non-retried Google Places (New) lookup for companies with no person-level channel.
+- Google Places keys use `mixrank auth google-places login|status|logout`, with environment precedence and a separate OS-vault service.
+- Added mocked Places and contactability coverage and kept the shared workflow concurrency/request budget.
+
 # MixRank v0.4.0
 
 Company-contact workflows now merge duplicate input records before making API requests. CLI, Go SDK, and both MCP transports share the same logic: exact normalized domains and overlapping company IDs form one business, preserving alternate names, domains, IDs, and stable order. The report exposes merge counts. Search and email filtering use the retained aliases; names alone never establish identity.

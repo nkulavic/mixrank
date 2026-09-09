@@ -12,12 +12,16 @@ import (
 
 const WorkflowToolCount = 2
 
-func addContactTool(s *mcp.Server, factory ClientFactory) {
+func addContactTool(s *mcp.Server, factory ClientFactory, placesFactory PlacesFactory) {
 	addContactValidationTool(s, factory)
 	company := map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"type": "string"}, "company_ids": map[string]any{"type": "array", "maxItems": 10, "items": map[string]any{"type": []string{"string", "integer"}}}, "domain": map[string]any{"type": "string"}, "qualification_status": map[string]any{"type": "string"}}, "additionalProperties": false, "anyOf": []any{map[string]any{"required": []string{"company_ids"}}, map[string]any{"required": []string{"domain"}}}}
 	companyProps := company["properties"].(map[string]any)
 	companyProps["name_aliases"] = map[string]any{"type": "array", "maxItems": 250, "items": map[string]any{"type": "string"}}
 	companyProps["domain_aliases"] = map[string]any{"type": "array", "maxItems": 9, "items": map[string]any{"type": "string"}}
+	companyProps["website"] = map[string]any{"type": "string"}
+	companyProps["locality"] = map[string]any{"type": "string"}
+	companyProps["region"] = map[string]any{"type": "string"}
+	companyProps["country_code"] = map[string]any{"type": "string"}
 	bound := func(min, max, def int) map[string]any {
 		return map[string]any{"type": "integer", "minimum": min, "maximum": max, "default": def}
 	}
@@ -29,7 +33,9 @@ func addContactTool(s *mcp.Server, factory ClientFactory) {
 	}
 	props["concurrency"] = bound(1, 16, 4)
 	props["contact_filter"] = map[string]any{"type": "string", "enum": []string{"all", "any", "email", "phone", "both", "none", "valid-email"}, "default": "all"}
-	s.AddTool(&mcp.Tool{Name: "mixrank_company_contacts", Description: "Find current owners/executives/managers at supplied companies and retrieve actual available business emails and direct dials. Automatically merges duplicate company IDs/domains before lookups, retains aliases and reports merge counts. Returns contacts, sources, employer evidence, missing data and review flags. Bounded parallel lookups with optional bulk email validation. One contacts array includes availability and enrichment status; contact_filter selects rows. No email guessing or message sending.", InputSchema: schema, Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: ptr(false), IdempotentHint: false, OpenWorldHint: ptr(true)}}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	props["contactable_only"] = map[string]any{"type": "boolean", "default": false, "description": "Return only businesses with at least one email or phone; equivalent to contact_filter any plus omitting empty company rows."}
+	props["places_fallback"] = map[string]any{"type": "boolean", "default": false, "description": "For businesses without a person-level channel, explicitly allow one Google Places business phone/website lookup."}
+	s.AddTool(&mcp.Tool{Name: "mixrank_company_contacts", Description: "Find current owners/executives/managers at supplied companies and retrieve actual available business emails and direct dials. Automatically merges duplicate company IDs/domains before lookups, retains aliases and reports merge counts. Returns contacts, sources, employer evidence, missing data and review flags. Bounded parallel lookups with optional bulk email validation. One contacts array includes person rows and an explicitly labeled Google Places business row when places_fallback is enabled. contactable_only returns only businesses with an email or phone. No email guessing or message sending.", InputSchema: schema, Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: ptr(false), IdempotentHint: false, OpenWorldHint: ptr(true)}}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var in struct {
 			Companies          json.RawMessage `json:"companies"`
 			Roles              []string        `json:"roles"`
@@ -43,6 +49,8 @@ func addContactTool(s *mcp.Server, factory ClientFactory) {
 			ValidationWait     *int            `json:"validation_wait_seconds"`
 			ValidationMaxAge   string          `json:"validation_maxage"`
 			EmailsOnly         bool            `json:"emails_only"`
+			ContactableOnly    bool            `json:"contactable_only"`
+			PlacesFallback     bool            `json:"places_fallback"`
 		}
 		if json.Unmarshal(req.Params.Arguments, &in) != nil {
 			return failure("invalid contact arguments"), nil
@@ -59,7 +67,14 @@ func addContactTool(s *mcp.Server, factory ClientFactory) {
 		if in.ValidationWait != nil {
 			wait = time.Duration(*in.ValidationWait) * time.Second
 		}
-		report, err := c.CompanyContacts(ctx, mixrank.ContactOptions{Companies: companies, Roles: in.Roles, MaxContacts: in.MaxContacts, MaxCandidates: in.MaxCandidates, MaxRequests: in.MaxRequests, EmailsOnly: in.EmailsOnly, Concurrency: in.Concurrency, ContactFilter: in.ContactFilter, ValidateEmails: in.ValidateEmails, ValidationOptions: mixrank.ContactValidationOptions{Strategy: in.ValidationStrategy, Wait: wait, MaxAge: in.ValidationMaxAge}})
+		var places *mixrank.PlacesClient
+		if in.PlacesFallback && placesFactory != nil {
+			places, e = placesFactory(ctx)
+			if e != nil {
+				return failure(e.Error()), nil
+			}
+		}
+		report, err := c.CompanyContacts(ctx, mixrank.ContactOptions{Companies: companies, Roles: in.Roles, MaxContacts: in.MaxContacts, MaxCandidates: in.MaxCandidates, MaxRequests: in.MaxRequests, EmailsOnly: in.EmailsOnly, Concurrency: in.Concurrency, ContactFilter: in.ContactFilter, ContactableOnly: in.ContactableOnly, PlacesFallback: in.PlacesFallback, Places: places, ValidateEmails: in.ValidateEmails, ValidationOptions: mixrank.ContactValidationOptions{Strategy: in.ValidationStrategy, Wait: wait, MaxAge: in.ValidationMaxAge}})
 		if report == nil {
 			return failure(c.Redact(err.Error())), nil
 		}
