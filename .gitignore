@@ -9,3 +9,6 @@
 .mixrank/
 /mixrank
 /plugins/**/bin/
+
+__pycache__/
+*.py[cod]
