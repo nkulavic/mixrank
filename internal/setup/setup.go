@@ -22,6 +22,7 @@ type Options struct {
 	Components                 []string
 	Scope, Destination, Action string
 	DryRun                     bool
+	StateDir                   string // Optional isolated receipt directory for embedding and integration tests.
 }
 type Step struct {
 	Component   string   `json:"component"`
@@ -132,6 +133,10 @@ func Plan(o Options) ([]Step, error) {
 }
 func Apply(ctx context.Context, o Options, steps []Step) ([]string, error) {
 	path, e := statePath()
+	if o.StateDir != "" {
+		path = filepath.Join(o.StateDir, "install.json")
+		e = nil
+	}
 	if e != nil {
 		return nil, e
 	}
